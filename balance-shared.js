@@ -1,0 +1,786 @@
+// balance-shared.js
+// Lõi dùng chung cho hệ thống BalanceAI: ngân hàng câu hỏi mặc định (dự phòng),
+// ngân hàng đề THEO LỚP + MÔN do quản trị viên nạp sẵn (thủ công hoặc bằng AI, xem admin.html),
+// công thức tính điểm BalanceAI cố định, mô hình 4 mức độ, và các hàm đọc/ghi Firestore.
+//
+// BalanceAI là HỆ THỐNG ĐỘC LẬP HOÀN TOÀN với AI SMART Chatbot / Learning Passport / tiện ích
+// Chrome: không dùng chung Firebase project, không dùng chung tài khoản đăng nhập, không dùng
+// chung lịch sử hội thoại. Học sinh làm khảo sát KHÔNG cần đăng nhập; trang Dữ liệu và trang
+// admin.html yêu cầu mã truy cập/mật khẩu riêng (xem mục 9).
+//
+// KIẾN TRÚC ĐỀ + CHẤM ĐIỂM:
+//   (a) NGÂN HÀNG ĐỀ (mục 7): quản trị viên (ở admin.html) chuẩn bị sẵn 1 bộ đề đầy đủ (25 câu
+//       Likert + 5 tình huống tự luận, kèm rubric keyPoints/riskKeywords) cho TỪNG (khối lớp, môn
+//       học) — thủ công hoặc bấm "Tạo nhanh bằng AI" (gọi AI ĐÚNG 1 LẦN cho combo đó, quản trị viên
+//       xem/sửa rồi mới lưu). KHÔNG còn cơ chế tự động gọi AI khi học sinh gặp tổ hợp mới.
+//   (b) LẮP RÁP ĐỀ (assembleTestForProfile): khi học sinh làm khảo sát, hệ thống CHỈ ĐỌC ngân hàng
+//       theo (các) môn học sinh đã chọn rồi chia đều 25 câu + 5 tình huống cho các môn đó — thuần
+//       đọc dữ liệu + logic JS, KHÔNG gọi AI.
+//   (c) CHẤM ĐIỂM (cả bảng hỏi lẫn tình huống) hoàn toàn bằng CÔNG THỨC CỐ ĐỊNH trong JavaScript
+//       (mục 2 và mục 3 bên dưới), dựa trên rubric đã có sẵn trong đề — KHÔNG gọi AI lúc học sinh
+//       nộp bài để chấm điểm, nên điểm số hoàn toàn nhất quán, có thể kiểm tra lại được.
+//   (d) SAU KHI đã có điểm số cố định (dimensionScores, acdiScore, level), gọi AI ĐÚNG 1 LẦN để viết
+//       NHẬN XÉT/LỜI KHUYÊN cá nhân hoá — CHỈ nhận điểm số/nhãn tổng quát, KHÔNG nhận nội dung đề hay
+//       câu trả lời gốc của học sinh (xem generateFeedbackWithAI, mục 5b). Nếu lỗi, hệ thống dùng
+//       buildRecommendation() (thuần công thức) làm phương án dự phòng.
+
+import { acdiDb as db } from "./balance-firebase-config.js";
+import {
+  collection, addDoc, getDocs, getDoc, doc, setDoc, deleteDoc, query, orderBy, serverTimestamp,
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { askAcdiGateway } from "./balance-gateway.js";
+
+// ============ GỌI AI QUA BalanceAI GATEWAY (n8n) ============
+// Không còn API key/endpoint trong trình duyệt; prompt do n8n dựng. Xem balance-gateway.js.
+
+// ============ 0. THANG LIKERT DÙNG CHUNG ============
+export const LIKERT_OPTIONS = [
+  { value: 1, label: "Hoàn toàn không đúng" },
+  { value: 2, label: "Phần lớn không đúng" },
+  { value: 3, label: "Đúng một phần" },
+  { value: 4, label: "Phần lớn đúng" },
+  { value: 5, label: "Hoàn toàn đúng" },
+];
+
+// 5 khoá nhóm chỉ báo CỐ ĐỊNH — AI soạn đề PHẢI dùng đúng 5 khoá này, theo đúng ý nghĩa mô tả,
+// để công thức chấm điểm (dựa theo "key") luôn áp dụng được, bất kể nội dung câu hỏi cụ thể
+// do AI soạn ra khác nhau giữa các bộ đề.
+export const GROUP_DEFS = [
+  { key: "start", title: "Phụ thuộc khi bắt đầu nhiệm vụ", desc: "Mức độ cần AI để xác định cách làm hoặc khởi động một nhiệm vụ.", reverse: false },
+  { key: "idea", title: "Phụ thuộc về ý tưởng", desc: "Khả năng tự hình thành ý tưởng, dàn ý hoặc phương án giải quyết.", reverse: false },
+  { key: "process", title: "Phụ thuộc trong xử lí nhiệm vụ", desc: "Mức độ giao cho AI thực hiện phân tích, lập luận hoặc hoàn thành sản phẩm.", reverse: false },
+  { key: "trust", title: "Phụ thuộc vào kết quả của AI", desc: "Mức độ tin tưởng và chấp nhận câu trả lời AI mà không kiểm tra.", reverse: false },
+  { key: "independence", title: "Khả năng hoạt động khi không có AI", desc: "Khả năng ghi nhớ, giải thích, vận dụng và tự hoàn thành nhiệm vụ khi AI không còn hỗ trợ.", reverse: true },
+];
+
+// ============ 1. BỘ ĐỀ MẶC ĐỊNH (dự phòng khi AI lỗi / chưa cấu hình được API) ============
+export const DEFAULT_ACDI_GROUPS = [
+  {
+    key: "start", title: GROUP_DEFS[0].title, desc: GROUP_DEFS[0].desc,
+    questions: [
+      { id: "g1q1", text: "Tôi thường hỏi AI ngay khi nhận được một bài tập khó.", reverse: false },
+      { id: "g1q2", text: "Tôi khó bắt đầu làm bài nếu không có AI gợi ý.", reverse: false },
+      { id: "g1q3", text: "Tôi thường chờ AI đưa ra hướng giải quyết trước khi tự nghĩ.", reverse: false },
+      { id: "g1q4", text: "Tôi cảm thấy lo lắng nếu phải bắt đầu một nhiệm vụ mà không có AI hỗ trợ.", reverse: false },
+      { id: "g1q5", text: "Tôi ít khi tự đọc kỹ đề bài trước khi mở công cụ AI.", reverse: false },
+    ],
+  },
+  {
+    key: "idea", title: GROUP_DEFS[1].title, desc: GROUP_DEFS[1].desc,
+    questions: [
+      { id: "g2q1", text: "Tôi thường nhờ AI nghĩ ý tưởng thay mình.", reverse: false },
+      { id: "g2q2", text: "Tôi khó tự lập dàn ý nếu không có AI.", reverse: false },
+      { id: "g2q3", text: "Tôi thường chọn ý tưởng của AI mà không phát triển ý tưởng riêng.", reverse: false },
+      { id: "g2q4", text: "Tôi hiếm khi đưa ra ý tưởng của riêng mình trước khi hỏi AI.", reverse: false },
+      { id: "g2q5", text: "Tôi thấy khó nghĩ ra hướng giải quyết mới nếu không tham khảo AI trước.", reverse: false },
+    ],
+  },
+  {
+    key: "process", title: GROUP_DEFS[2].title, desc: GROUP_DEFS[2].desc,
+    questions: [
+      { id: "g3q1", text: "Tôi thường nhờ AI làm phần khó nhất của bài tập.", reverse: false },
+      { id: "g3q2", text: "Tôi sử dụng câu trả lời của AI ngay cả khi chưa hiểu rõ.", reverse: false },
+      { id: "g3q3", text: "Tôi ít tự tìm cách giải khác sau khi AI đã đưa ra đáp án.", reverse: false },
+      { id: "g3q4", text: "Tôi thường để AI hoàn thành phần lớn bài làm rồi chỉ chỉnh sửa lại.", reverse: false },
+      { id: "g3q5", text: "Tôi hiếm khi tự phân tích vấn đề trước khi để AI xử lí.", reverse: false },
+    ],
+  },
+  {
+    key: "trust", title: GROUP_DEFS[3].title, desc: GROUP_DEFS[3].desc,
+    questions: [
+      { id: "g4q1", text: "Tôi thường cho rằng câu trả lời của AI là đúng.", reverse: false },
+      { id: "g4q2", text: "Tôi ít kiểm tra thông tin AI bằng sách hoặc nguồn khác.", reverse: false },
+      { id: "g4q3", text: "Tôi khó phát hiện điểm chưa hợp lí trong câu trả lời của AI.", reverse: false },
+      { id: "g4q4", text: "Tôi thường nộp bài ngay sau khi nhận được câu trả lời từ AI mà không xem lại.", reverse: false },
+      { id: "g4q5", text: "Tôi tin tưởng AI hơn là tự kiểm tra lại bằng kiến thức của mình.", reverse: false },
+    ],
+  },
+  {
+    key: "independence", title: GROUP_DEFS[4].title, desc: GROUP_DEFS[4].desc,
+    questions: [
+      { id: "g5q1", text: "Tôi có thể giải thích lại nội dung do AI hỗ trợ bằng lời của mình.", reverse: true },
+      { id: "g5q2", text: "Tôi có thể làm một bài tương tự mà không cần AI.", reverse: true },
+      { id: "g5q3", text: "Sau khi dùng AI, tôi vẫn nhớ được cách giải quyết vấn đề.", reverse: true },
+      { id: "g5q4", text: "Tôi vẫn hoàn thành được nhiệm vụ nếu không có AI, dù mất nhiều thời gian hơn.", reverse: true },
+      { id: "g5q5", text: "Tôi có thể tự kiểm tra lại kết quả của mình mà không cần AI xác nhận.", reverse: true },
+    ],
+  },
+];
+
+export const DEFAULT_SCENARIOS = [
+  {
+    id: "s1", title: "Tình huống 1 · Phát hiện lỗi trong câu trả lời AI",
+    prompt: "AI trả lời câu hỏi \"Tính diện tích hình chữ nhật có chiều dài 8cm và chiều rộng 3cm\" như sau:",
+    aiAnswer: "\"Diện tích hình chữ nhật là 8 + 3 = 11 cm².\"",
+    question: "Câu trả lời trên có lỗi gì? Hãy chỉ ra lỗi và sửa lại cho đúng bằng lời của bạn.",
+    type: "text",
+    keyPoints: [
+      { label: "Chỉ ra phép tính sai (phải nhân, không phải cộng)", keywords: ["nhân", "phép nhân", "8 x 3", "8x3", "không phải cộng"] },
+      { label: "Đưa ra đáp số đúng 24 cm²", keywords: ["24"] },
+    ],
+    riskKeywords: ["không biết", "em không rõ", "chắc là đúng", "ai nói vậy", "đúng rồi", "không có lỗi"],
+  },
+  {
+    id: "s2", title: "Tình huống 2 · Kiểm chứng nguồn thông tin",
+    prompt: "Bạn vừa nhận được một câu trả lời từ AI và muốn kiểm chứng lại.",
+    question: "Bạn sẽ kiểm chứng bằng cách nào? Giải thích ngắn gọn vì sao bạn chọn cách đó.",
+    type: "text",
+    keyPoints: [
+      { label: "Nêu được nguồn đáng tin cậy để đối chiếu", keywords: ["sách giáo khoa", "giáo viên", "thầy cô", "tài liệu", "sách"] },
+      { label: "Giải thích lý do chọn nguồn đó (đáng tin, chính thống...)", keywords: ["đáng tin", "chính xác", "chính thống", "kiểm chứng"] },
+    ],
+    riskKeywords: ["không kiểm tra", "tin luôn", "không cần kiểm chứng", "hỏi lại ai", "hỏi lại ai đó"],
+  },
+  {
+    id: "s3", title: "Tình huống 3 · Giải thích bằng lời của bản thân",
+    prompt: "AI giải thích khái niệm sau:",
+    aiAnswer: "\"Quang hợp là quá trình cây xanh sử dụng ánh sáng mặt trời, nước và khí carbon dioxide để tạo ra glucose và khí oxy, nhờ chất diệp lục trong lá cây.\"",
+    question: "Hãy viết lại cách hiểu của bạn về khái niệm trên bằng lời của chính mình (ít nhất một câu, không chép lại nguyên văn).",
+    type: "text",
+    keyPoints: [
+      { label: "Nêu được nguyên liệu/điều kiện (ánh sáng, nước, CO2)", keywords: ["ánh sáng", "nước", "carbon", "co2", "khí carbonic"] },
+      { label: "Nêu được sản phẩm tạo ra (glucose/chất hữu cơ và oxy)", keywords: ["glucose", "chất hữu cơ", "oxy", "oxi"] },
+    ],
+    riskKeywords: ["không biết", "em không rõ", "ai nói vậy", "copy"],
+  },
+  {
+    id: "s4", title: "Tình huống 4 · Trình bày cách làm của riêng bạn",
+    prompt: "Khi gặp một bài tập khó, giả sử bạn KHÔNG dùng AI để tra cứu ngay.",
+    question: "Hãy trình bày các bước bạn sẽ làm để tự giải quyết bài tập đó (không chỉ nêu đáp số).",
+    type: "text",
+    keyPoints: [
+      { label: "Nêu được bước đọc/hiểu đề trước", keywords: ["đọc đề", "hiểu đề", "phân tích đề", "xác định yêu cầu"] },
+      { label: "Nêu được bước tự thử/tự giải trước khi tra cứu thêm", keywords: ["tự làm", "tự giải", "thử làm", "suy nghĩ"] },
+    ],
+    riskKeywords: ["hỏi ai luôn", "chép đáp án", "không biết làm sao", "chịu"],
+  },
+  {
+    id: "s5", title: "Tình huống 5 · Tự giải quyết khi không có AI",
+    prompt: "Hãy tự giải bài toán ngắn sau (không dùng AI, máy tính hay tra cứu):",
+    question: "Một quyển sách có 240 trang. Nếu đọc đều 24 trang mỗi ngày thì cần bao nhiêu ngày để đọc hết? Trình bày cách tính và đáp số bằng lời của bạn.",
+    type: "text",
+    keyPoints: [
+      { label: "Trình bày phép chia 240:24", keywords: ["240", "24", "chia"] },
+      { label: "Đưa ra đáp số đúng 10 ngày", keywords: ["10 ngày", "= 10", "10"] },
+    ],
+    riskKeywords: ["không biết", "em không rõ", "chắc là", "không tính được"],
+  },
+];
+
+// Giữ 2 tên cũ để không phá code đang import ACDI_GROUPS / SCENARIOS ở nơi khác (nếu có).
+export const ACDI_GROUPS = DEFAULT_ACDI_GROUPS;
+export const SCENARIOS = DEFAULT_SCENARIOS;
+
+export function allQuestionIds(groups = DEFAULT_ACDI_GROUPS) {
+  return groups.flatMap((g) => g.questions.map((q) => q.id));
+}
+
+// Điểm 1 câu quy về thang 0-100, đã đảo điểm nếu cần (reverse:true)
+function scoreQuestion(q, rawValue) {
+  const v = q.reverse ? 6 - rawValue : rawValue;
+  return ((v - 1) / 4) * 100;
+}
+
+// Điểm từng nhóm chỉ báo (0-100). Nhận "groups" của bộ đề đang dùng (mặc định hoặc do AI soạn).
+export function computeDimensionScores(answers, groups = DEFAULT_ACDI_GROUPS) {
+  const dimensionScores = {};
+  groups.forEach((g) => {
+    const scores = g.questions.map((q) => scoreQuestion(q, Number(answers[q.id]) || 3));
+    dimensionScores[g.key] = Math.round((scores.reduce((s, x) => s + x, 0) / scores.length) * 10) / 10;
+  });
+  return dimensionScores;
+}
+
+// Điểm bảng hỏi tổng = trung bình 5 nhóm chỉ báo
+export function computeQuestionnaireScore(dimensionScores) {
+  const vals = Object.values(dimensionScores);
+  return vals.reduce((s, x) => s + x, 0) / vals.length;
+}
+
+// ============ 2. CHẤM ĐIỂM TÌNH HUỐNG (tự luận) — HOÀN TOÀN BẰNG CÔNG THỨC CỐ ĐỊNH ============
+// KHÔNG gọi AI lúc học sinh nộp bài. Mỗi tình huống đã được AI soạn kèm "đáp án"/rubric
+// (keyPoints + riskKeywords) NGAY LÚC TẠO ĐỀ (xem node "Chat Gate" trong n8n/balance-gateway.json, mode generate_test) — rubric
+// đó được lưu cùng đề trong ngân hàng đề Firestore (acdiTestBank/{grade}_{subject}), nên việc chấm điểm về sau chỉ là
+// logic JS thuần: luôn ra cùng một kết quả cho cùng một câu trả lời, kiểm tra lại được, không phụ
+// thuộc việc gọi AI lúc chấm có ổn định hay không.
+
+function normalizeText(s) {
+  return String(s || "").toLowerCase().normalize("NFC")
+    .replace(/[.,!?;:"'()\u201c\u201d]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// Độ trùng lặp từ ngữ giữa câu trả lời học sinh và đoạn gốc AI (0-1, càng cao càng giống/sao chép).
+function copyOverlapRatio(referenceText, studentText) {
+  const studentWords = normalizeText(studentText).split(" ").filter(Boolean);
+  if (studentWords.length === 0) return 0;
+  const refWords = new Set(normalizeText(referenceText).split(" ").filter(Boolean));
+  if (refWords.size === 0) return 0;
+  const overlapCount = studentWords.filter((w) => refWords.has(w)).length;
+  return overlapCount / studentWords.length;
+}
+
+// Chấm 1 câu tự luận theo rubric cố định (keyPoints + riskKeywords) đã có sẵn trong "scenario".
+// Trả về điểm NGUY CƠ LỆ THUỘC AI (0-100, càng cao càng đáng lo). Thuần công thức, không dùng AI.
+//
+//  - Câu trả lời quá ngắn (dưới 6 từ) coi như chưa thể hiện được hiểu biết → nguy cơ cao ngay (90).
+//  - Điểm bắt đầu từ 100, GIẢM dần theo % ý chính (keyPoints) mà học sinh có nhắc tới (khớp nếu câu
+//    trả lời chứa ít nhất một từ khoá/đồng nghĩa trong "keywords" của ý đó).
+//  - CỘNG THÊM điểm nếu câu trả lời chứa cụm từ trong "riskKeywords" (dấu hiệu không tự hiểu).
+//  - CỘNG THÊM điểm nếu câu trả lời trùng lặp từ ngữ nhiều với "aiAnswer" (sao chép thay vì tự diễn
+//    đạt) — chỉ áp dụng khi tình huống có trường này.
+export function scoreEssayByRubric(scenario, studentText) {
+  const text = normalizeText(studentText);
+  const wordCount = text ? text.split(" ").filter(Boolean).length : 0;
+  if (wordCount < 6) return 94;
+
+  const keyPoints = Array.isArray(scenario.keyPoints) ? scenario.keyPoints : [];
+  let matchedCount = 0;
+  keyPoints.forEach((kp) => {
+    const kws = Array.isArray(kp.keywords) ? kp.keywords : [];
+    if (kws.some((kw) => text.includes(normalizeText(kw)))) matchedCount++;
+  });
+  const coverageRatio = keyPoints.length ? matchedCount / keyPoints.length : 0.5;
+
+  const overlapWithAi = scenario.aiAnswer ? copyOverlapRatio(scenario.aiAnswer, studentText) : 0;
+
+  // Nền điểm nguy cơ: phủ đủ ý chính -> nền rất thấp (~7), phủ 0 ý chính -> nền gần 100.
+  // Trước đây nền thấp nhất chỉ chạm ~25 dù trả lời xuất sắc — sửa lại để câu trả lời thật sự
+  // đầy đủ, tự diễn đạt, không sao chép vẫn có thể đạt điểm nguy cơ dưới 10 (công bằng cho học
+  // sinh giỏi thực sự, không bị "kẹt trần" ở giữa thang).
+  let score = 100 - coverageRatio * 93;
+
+  // Thưởng thêm khi câu trả lời vừa phủ hết ý chính, vừa đủ dài/chi tiết, vừa không sao chép —
+  // giúp phần thưởng cho sự "tự lập luận" rõ ràng thay vì chỉ khớp từ khoá.
+  if (coverageRatio >= 0.99 && wordCount >= 25 && overlapWithAi < 0.2) score -= 4;
+
+  const riskKeywords = Array.isArray(scenario.riskKeywords) ? scenario.riskKeywords : [];
+  const riskHits = riskKeywords.filter((kw) => text.includes(normalizeText(kw))).length;
+  score += Math.min(riskHits, 3) * 14; // mỗi cụm từ rủi ro cộng thêm, tối đa cộng 42
+
+  if (scenario.aiAnswer && overlapWithAi > 0.5) {
+    score += (overlapWithAi - 0.5) * 70; // chép gần nguyên văn -> cộng thêm nhiều, đủ vượt 90
+  }
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+// Chấm toàn bộ tình huống của MỘT bộ đề (nhận "scenarios" của bộ đề đang dùng).
+// Không còn là hàm async (không gọi AI) — giữ tên/đầu ra giống cũ để nơi gọi (results.html) không
+// phải sửa cách dùng ("await computeScenarioScores(...)" vẫn hợp lệ với giá trị không phải Promise).
+// Trả về { perScenario, overall }.
+export function computeScenarioScores(scenarioAnswers, scenarios = DEFAULT_SCENARIOS) {
+  const perScenario = {};
+  scenarios.forEach((sc) => {
+    perScenario[sc.id] = scoreEssayByRubric(sc, scenarioAnswers[sc.id]);
+  });
+  const vals = Object.values(perScenario);
+  const overall = vals.length ? vals.reduce((s, x) => s + x, 0) / vals.length : 0;
+  return { perScenario, overall };
+}
+
+// ============ 3. CÔNG THỨC BalanceAI (CỐ ĐỊNH — AI không tham gia bước này) ============
+// BalanceAI = 0,7 × Điểm lệ thuộc tự đánh giá (bảng hỏi) + 0,3 × Điểm nguy cơ từ tình huống
+export const QUESTIONNAIRE_WEIGHT = 0.7;
+export const SCENARIO_WEIGHT = 0.3;
+
+export function computeAcdiScore(questionnaireScore, scenarioScore) {
+  const raw = QUESTIONNAIRE_WEIGHT * questionnaireScore + SCENARIO_WEIGHT * scenarioScore;
+  return Math.round(raw * 10) / 10;
+}
+
+// ============ 4. MÔ HÌNH BỐN MỨC ĐỘ ============
+export const LEVEL_INFO = {
+  1: { title: "Sử dụng AI có kiểm soát", range: "0–24", color: "#1f9d6c",
+    desc: "Bạn chủ động suy nghĩ, có khả năng kiểm chứng và vẫn hoàn thành nhiệm vụ khi không có AI. AI chưa thay thế đáng kể các hoạt động nhận thức của bạn." },
+  2: { title: "Có dấu hiệu dựa vào AI", range: "25–49", color: "#f39c12",
+    desc: "Bạn sử dụng AI thường xuyên để tìm ý tưởng hoặc định hướng, nhưng vẫn còn khả năng tự xử lí và điều chỉnh kết quả." },
+  3: { title: "Lệ thuộc AI", range: "50–74", color: "#e67e22",
+    desc: "Bạn thường để AI thực hiện các phần quan trọng của nhiệm vụ, ít kiểm chứng và có thể gặp khó khăn khi phải tự giải thích hoặc làm lại." },
+  4: { title: "Nguy cơ lệ thuộc AI cao", range: "75–100", color: "#e74c3c",
+    desc: "AI đang có xu hướng thay thế phần lớn hoạt động tư duy của bạn. Bạn có thể thấy khó bắt đầu, giải quyết và hoàn thành nhiệm vụ nếu không có sự hỗ trợ của AI." },
+};
+
+export function classifyLevel(acdi) {
+  if (acdi < 25) return 1;
+  if (acdi < 50) return 2;
+  if (acdi < 75) return 3;
+  return 4;
+}
+
+// ============ 5. KHUYẾN NGHỊ CÁ NHÂN ============
+const GROUP_TIPS = {
+  start: "Hãy thử dành 2–3 phút tự đọc kỹ đề bài và phác thảo hướng làm trước khi mở công cụ AI.",
+  idea: "Hãy dành khoảng 5–10 phút tự viết ra các ý tưởng ban đầu của riêng mình trước khi tham khảo AI.",
+  process: "Hãy thử tự làm phần khó trước, chỉ xin AI gợi ý đúng chỗ mình thực sự vướng.",
+  trust: "Hãy tập thói quen đối chiếu câu trả lời của AI với ít nhất một nguồn khác trước khi dùng.",
+  independence: "Hãy thử làm lại một bài tương tự mà không dùng AI, để kiểm tra mức độ mình đã thực sự nắm được cách làm.",
+};
+
+export function groupTitle(key, groups = DEFAULT_ACDI_GROUPS) {
+  return groups.find((g) => g.key === key)?.title || GROUP_DEFS.find((g) => g.key === key)?.title || key;
+}
+
+export function buildRecommendation(dimensionScores, groups = DEFAULT_ACDI_GROUPS) {
+  const entries = Object.entries(dimensionScores);
+  const highest = entries.reduce((a, b) => (b[1] > a[1] ? b : a));
+  const lowest = entries.reduce((a, b) => (b[1] < a[1] ? b : a));
+  return {
+    highestRiskGroupKey: highest[0],
+    highestRiskGroup: groupTitle(highest[0], groups),
+    bestMaintainedGroupKey: lowest[0],
+    bestMaintainedGroup: groupTitle(lowest[0], groups),
+    tip: GROUP_TIPS[highest[0]] || "",
+  };
+}
+
+// ============ 5b. NHẬN XÉT / LỜI KHUYÊN CÁ NHÂN HOÁ — GỌI AI ĐÚNG 1 LẦN, SAU KHI ĐÃ CÓ ĐIỂM ============
+// QUAN TRỌNG: hàm này KHÔNG được dùng để tính hay sửa điểm số — điểm (dimensionScores/acdiScore/level)
+// VÀ việc xác định nhóm cao/thấp nhất (rec = buildRecommendation(...)) đã được chốt bằng công thức cố
+// định TRƯỚC khi gọi hàm này. AI KHÔNG được tự chọn nhóm khác để bàn luận — phải viết đúng về 2 nhóm
+// đã được xác định sẵn (rec.highestRiskGroup / rec.bestMaintainedGroup), nếu không sẽ bị lệch với tiêu
+// đề hiển thị (vốn lấy trực tiếp từ rec, không lấy từ AI). Nếu gọi AI lỗi, dùng buildRecommendation()
+// (thuần công thức, không cần mạng) làm phương án dự phòng — xem cách dùng ở balance-results.html.
+// LƯU Ý VỀ CHI PHÍ TOKEN VÀ DỮ LIỆU GỬI CHO AI: hàm này CHỦ Ý không gửi cho AI nội dung đề (câu hỏi,
+// đoạn "aiAnswer" mẫu, hay câu trả lời tự luận gốc của học sinh) — chỉ gửi ĐIỂM SỐ đã chấm xong
+// (theo từng phần, từng nhóm chỉ báo) và một NHÃN ĐỘ PHÙ HỢP tổng quát cho mỗi tình huống tự luận
+// (suy ra từ điểm, không phải văn bản gốc). Việc này vừa giảm đáng kể số token mỗi lần gọi AI, vừa
+// đảm bảo không đưa nội dung đề (vốn được coi là "chìa khoá chấm điểm" cần giữ kín) hay nguyên văn
+// bài làm của học sinh ra ngoài hệ thống chỉ để phục vụ viết nhận xét.
+function essayFitLabel(score) {
+  const s = Number(score);
+  if (!Number.isFinite(s)) return "chưa có dữ liệu";
+  if (s <= 20) return "rất phù hợp, thể hiện khả năng tự lập luận tốt";
+  if (s <= 40) return "khá phù hợp, còn vài chỗ có thể tự lập luận thêm";
+  if (s <= 65) return "có phần hạn chế, còn dựa khá nhiều vào gợi ý sẵn có";
+  if (s <= 85) return "hạn chế rõ, thiếu ý chính/lập luận của riêng mình";
+  return "chưa phù hợp, gần như chưa thể hiện được tư duy độc lập";
+}
+
+function scenarioCategoryLabel(title) {
+  // Chỉ giữ lại TÊN DẠNG tình huống (ví dụ "Phát hiện lỗi trong câu trả lời AI"), bỏ tiền tố
+  // "Tình huống N ·" — đây là tên loại nhiệm vụ, không phải nội dung đề cụ thể.
+  return String(title || "").replace(/^Tình huống\s*\d+\s*[·.\-–]?\s*/i, "").trim() || "Tình huống tự luận";
+}
+
+export async function generateFeedbackWithAI({ info, groups, scenarios, perScenario, dimensionScores, questionnaireScore, scenarioScore, acdiScore, level, rec }) {
+  // Prompt nhận xét nằm ở n8n (phía server). Trình duyệt chỉ gửi ĐIỂM SỐ đã chấm + tên 2 nhóm đã xác định sẵn.
+  const params = {
+    schoolLevel: info?.schoolLevel === "thpt" ? "thpt" : "thcs",
+    grade: String(info?.grade ?? ""),
+    acdiScore, level, questionnaireScore: questionnaireScore ?? 0, scenarioScore: scenarioScore ?? 0,
+    groups: groups.map((g) => ({ title: g.title, score: dimensionScores[g.key] })),
+    scenarios: (scenarios || []).map((sc) => ({ title: sc.title, score: perScenario?.[sc.id] ?? null })),
+    highestRiskGroup: rec.highestRiskGroup,
+    bestMaintainedGroup: rec.bestMaintainedGroup,
+  };
+
+  try {
+    const raw = await askAcdiGateway({ mode: "feedback", params, timeoutMs: 60000 });
+    const cleaned = String(raw).replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    if (!parsed || typeof parsed.highestRiskComment !== "string" || typeof parsed.strengthComment !== "string" || typeof parsed.advice !== "string") {
+      throw new Error("JSON nhận xét từ AI không đúng cấu trúc.");
+    }
+    return { ...parsed, source: "ai" };
+  } catch (err) {
+    console.warn("Tạo nhận xét cá nhân hoá bằng AI thất bại, dùng khuyến nghị mặc định:", err);
+    return {
+      highestRiskComment: `Nhóm "${rec.highestRiskGroup}" đang là nhóm bạn cần chú ý nhất.`,
+      strengthComment: `Nhóm "${rec.bestMaintainedGroup}" là nhóm bạn duy trì tốt nhất.`,
+      advice: rec.tip,
+      source: "fallback",
+    };
+  }
+}
+
+// ============ 6. MÃ NGƯỜI THAM GIA (ẨN DANH) ============
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export function generateParticipantCode(len = 8) {
+  let out = "";
+  for (let i = 0; i < len; i++) out += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  return out;
+}
+
+// ============ 7. NGÂN HÀNG ĐỀ THEO LỚP + MÔN (quản trị viên tự nạp, không tự động gọi AI nữa) ============
+// THAY ĐỔI KIẾN TRÚC: trước đây hệ thống tự gọi AI mỗi khi gặp một tổ hợp (cấp học+khối lớp+môn học)
+// CHƯA từng có ai làm khảo sát. Giờ KHÔNG còn cơ chế đó nữa — việc soạn đề (thủ công hoặc bằng AI)
+// chỉ diễn ra ở trang admin.html (tab "Quản trị đề khảo sát"), do quản trị viên chủ động thực hiện
+// và LƯU SẴN vào ngân hàng đề cho từng (khối lớp, môn học). Khi học sinh làm khảo sát, hệ thống CHỈ
+// ĐỌC ra từ ngân hàng đã có sẵn để LẮP RÁP thành 1 bộ đề (25 câu Likert + 5 tình huống tự luận) —
+// KHÔNG gọi AI ở bước này nữa, dù gặp tổ hợp lớp/môn nào cũng vậy.
+//
+// Mỗi đề trong ngân hàng (1 khối lớp + 1 môn học) LUÔN có đúng cấu trúc 25 câu Likert (5 nhóm × 5
+// câu) + 5 tình huống tự luận — giống hệt cấu trúc một bộ đề đầy đủ bình thường — lưu tại:
+//   Firestore: acdiTestBank/{grade}_{subject}
+//     { grade, subject, groups: [ 5 nhóm × 5 câu ], scenarios: [ 5 tình huống ], source: "ai"|"manual", updatedAt }
+//
+// LẮP RÁP ĐỀ CHO 1 LƯỢT KHẢO SÁT (assembleTestForProfile): học sinh có thể chọn NHIỀU môn học cùng
+// lúc (ở trang Thông tin khảo sát) — nếu vậy, hệ thống lấy đề của TỪNG môn đã chọn (cùng khối lớp),
+// rồi CHIA ĐỀU 25 câu Likert (vẫn giữ đúng 5 câu/nhóm) và 5 tình huống tự luận cho các môn đó theo
+// tỉ lệ càng cân bằng càng tốt (ví dụ 2 môn -> ~13/12 câu Likert, ~3/2 tình huống), KHÔNG ưu tiên cố
+// định môn nào. Nếu chỉ 1 môn có đề -> dùng nguyên đề môn đó. Nếu KHÔNG có đề nào cho các môn đã chọn
+// (ngân hàng chưa được quản trị viên nạp) -> dùng bộ đề mặc định (DEFAULT_ACDI_GROUPS/DEFAULT_SCENARIOS)
+// làm phương án dự phòng, để học sinh vẫn làm được khảo sát bình thường.
+
+export const SUBJECT_LABELS = {
+  math: "Toán", physics: "Lý", chemistry: "Hóa", literature: "Văn", english: "Anh", other: "Môn khác",
+};
+export const SUBJECT_KEYS = Object.keys(SUBJECT_LABELS);
+
+function testBankDocId(grade, subject) {
+  return `${grade}_${subject}`;
+}
+
+// Đọc 1 đề trong ngân hàng theo (khối lớp, môn học). Trả về null nếu chưa có/lỗi.
+export async function getTestBank(grade, subject) {
+  try {
+    const snap = await getDoc(doc(db, "acdiTestBank", testBankDocId(grade, subject)));
+    return snap.exists() ? snap.data() : null;
+  } catch (err) {
+    console.warn("Không đọc được ngân hàng đề:", err);
+    return null;
+  }
+}
+
+// Lưu/ghi đè 1 đề trong ngân hàng (dùng ở trang admin — nhập tay hoặc sau khi AI soạn xong và
+// quản trị viên đã xem/chỉnh sửa lại). "source" chỉ để ghi chú nguồn gốc, không ảnh hưởng chấm điểm.
+export async function saveTestBank(grade, subject, { groups, scenarios, source }) {
+  if (!validateGeneratedTest({ groups, scenarios })) {
+    throw new Error("Cấu trúc đề không hợp lệ: cần đúng 5 nhóm × 5 câu Likert và 5 tình huống tự luận đủ rubric.");
+  }
+  await setDoc(doc(db, "acdiTestBank", testBankDocId(grade, subject)), {
+    grade: String(grade), subject, groups, scenarios,
+    source: source || "manual", updatedAt: serverTimestamp(),
+  });
+}
+
+// Xoá hẳn 1 đề khỏi ngân hàng (dùng ở trang admin).
+export async function deleteTestBank(grade, subject) {
+  await deleteDoc(doc(db, "acdiTestBank", testBankDocId(grade, subject)));
+}
+
+// Danh sách toàn bộ đề đã có trong ngân hàng (dùng để hiển thị bảng tổng quan ở trang admin —
+// combo lớp/môn nào đã có đề, đề đó có bao nhiêu câu, cập nhật lúc nào, nguồn gốc AI hay nhập tay).
+export async function listTestBankMeta() {
+  const snap = await getDocs(collection(db, "acdiTestBank"));
+  return snap.docs.map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      grade: data.grade,
+      subject: data.subject,
+      source: data.source || "manual",
+      updatedAt: data.updatedAt,
+      questionCount: (data.groups || []).reduce((s, g) => s + (g.questions?.length || 0), 0),
+      scenarioCount: (data.scenarios || []).length,
+    };
+  });
+}
+
+// Đọc TOÀN BỘ nội dung các đề trong ngân hàng (dùng để xuất ngân hàng câu hỏi ra CSV/Excel ở trang admin).
+export async function listAllTestBanks() {
+  const snap = await getDocs(collection(db, "acdiTestBank"));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+// Soạn 1 đề đầy đủ (25 câu Likert + 5 tình huống tự luận) cho ĐÚNG 1 (khối lớp, môn học) bằng AI —
+// dùng đúng prompt/luật soạn đề đặt ở n8n (mode generate_test) (chỉ truyền subjects là mảng
+// 1 phần tử). Hàm này CHỈ được gọi từ trang admin.html khi quản trị viên bấm "Tạo nhanh bằng AI" —
+// KHÔNG được gọi tự động lúc học sinh làm khảo sát.
+export async function generateSubjectTestWithAI({ schoolLevel, grade, subject }) {
+  return generateTestWithAI({ schoolLevel, grade, subjects: [subject] });
+}
+
+function shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Chia "total" slot cho "k" nguồn sao cho càng đều càng tốt, phần dư xoay vòng theo "rotateOffset"
+// (để dồn tích qua nhiều nhóm/nhiều lượt vẫn ra tổng cân bằng thay vì luôn ưu tiên 1 nguồn cố định).
+// Ví dụ total=5, k=2: base=2 mỗi nguồn, dư 1 -> xoay giữa 2 nguồn theo từng nhóm, tổng cả 5 nhóm
+// ra khoảng 13/12 — đúng như ví dụ khách hàng mô tả (2 môn, 25 câu -> ~13/12).
+function distributeCounts(total, k, rotateOffset = 0) {
+  const base = Math.floor(total / k);
+  const remainder = total - base * k;
+  const counts = new Array(k).fill(base);
+  for (let r = 0; r < remainder; r++) counts[(rotateOffset + r) % k] += 1;
+  return counts;
+}
+
+// Lắp ráp 1 bộ đề hoàn chỉnh cho 1 lượt khảo sát, dựa trên các đề đã có sẵn trong ngân hàng cho
+// khối lớp + (các) môn học học sinh đã chọn — KHÔNG gọi AI. Trả về { groups, scenarios, source,
+// subjectsUsed }. source: "bank" (lắp từ ngân hàng) hoặc "default" (chưa có đề nào trong ngân hàng
+// cho các môn đã chọn, dùng bộ đề mặc định để học sinh vẫn làm được khảo sát).
+export async function assembleTestForProfile({ schoolLevel, grade, subjects }) {
+  const subjectList = Array.from(new Set((subjects || []).filter((s) => SUBJECT_KEYS.includes(s))));
+  if (subjectList.length === 0) {
+    return { groups: DEFAULT_ACDI_GROUPS, scenarios: DEFAULT_SCENARIOS, source: "default", subjectsUsed: [] };
+  }
+
+  const banks = [];
+  for (const subj of subjectList) {
+    const bank = await getTestBank(grade, subj);
+    if (bank && validateGeneratedTest(bank)) banks.push({ subject: subj, ...bank });
+  }
+
+  if (banks.length === 0) {
+    return { groups: DEFAULT_ACDI_GROUPS, scenarios: DEFAULT_SCENARIOS, source: "default", subjectsUsed: [] };
+  }
+
+  if (banks.length === 1) {
+    return { groups: banks[0].groups, scenarios: banks[0].scenarios, source: "bank", subjectsUsed: [banks[0].subject] };
+  }
+
+  const k = banks.length;
+  const groupKeys = ["start", "idea", "process", "trust", "independence"];
+  const assembledGroups = groupKeys.map((key, groupIdx) => {
+    const counts = distributeCounts(5, k, groupIdx); // xoay theo groupIdx -> tổng dồn qua 5 nhóm ra cân bằng
+    let picked = [];
+    banks.forEach((bank, i) => {
+      const bankGroup = bank.groups.find((g) => g.key === key) || bank.groups[groupIdx];
+      const qs = shuffleArray(bankGroup?.questions || []).slice(0, counts[i])
+        .map((q) => ({ ...q, id: `${key}_${bank.subject}_${q.id}` })); // đổi id -> tránh trùng giữa các môn
+      picked = picked.concat(qs);
+    });
+    const canonical = GROUP_DEFS[groupIdx];
+    return { key: canonical.key, title: canonical.title, desc: canonical.desc, questions: shuffleArray(picked) };
+  });
+
+  const essayCounts = distributeCounts(5, k, 0);
+  let pickedScenarios = [];
+  banks.forEach((bank, i) => {
+    const cands = shuffleArray(bank.scenarios || []).slice(0, essayCounts[i]);
+    pickedScenarios = pickedScenarios.concat(cands);
+  });
+  pickedScenarios = shuffleArray(pickedScenarios).map((sc, idx) => ({
+    ...sc, id: `s${idx + 1}`, title: `Tình huống ${idx + 1} · ${scenarioCategoryLabel(sc.title)}`,
+  }));
+
+  return { groups: assembledGroups, scenarios: pickedScenarios, source: "bank", subjectsUsed: banks.map((b) => b.subject) };
+}
+
+// ============ 7b. SOẠN ĐỀ BẰNG AI (prompt nằm ở n8n — node "Chat Gate", mode generate_test) ============
+
+export function validateGeneratedTest(data) {
+  if (!data || !Array.isArray(data.groups) || !Array.isArray(data.scenarios)) return false;
+  if (data.groups.length !== 5 || data.scenarios.length !== 5) return false;
+  const expectedKeys = ["start", "idea", "process", "trust", "independence"];
+  for (let i = 0; i < 5; i++) {
+    const g = data.groups[i];
+    if (!g || g.key !== expectedKeys[i] || !Array.isArray(g.questions) || g.questions.length !== 5) return false;
+    if (g.questions.some((q) => !q.id || typeof q.text !== "string")) return false;
+  }
+  const expectedIds = ["s1", "s2", "s3", "s4", "s5"];
+  for (let i = 0; i < 5; i++) {
+    const sc = data.scenarios[i];
+    if (!sc || sc.id !== expectedIds[i] || sc.type !== "text") return false;
+    if (typeof sc.question !== "string" || !sc.question.trim()) return false;
+    if (!Array.isArray(sc.keyPoints) || sc.keyPoints.length < 2) return false;
+    if (sc.keyPoints.some((k) => !k || typeof k.label !== "string" || !Array.isArray(k.keywords) || k.keywords.length < 1)) return false;
+    if (!Array.isArray(sc.riskKeywords) || sc.riskKeywords.length < 2) return false;
+  }
+  return true;
+}
+
+// Gọi AI để soạn 1 bộ đề mới theo tiêu chí. Ném lỗi nếu gọi AI thất bại hoặc JSON không hợp lệ
+// (nơi gọi hàm này nên tự bắt lỗi và dùng DEFAULT_ACDI_GROUPS/DEFAULT_SCENARIOS làm phương án dự phòng).
+//
+// LƯU Ý VỀ maxTokens: bộ đề đầy đủ (25 câu Likert + 5 tình huống tự luận, MỖI tình huống còn kèm
+// rubric "đáp án" keyPoints/riskKeywords) tạo ra JSON khá dài — nếu maxTokens quá thấp, phản hồi của
+// AI sẽ bị CẮT NGANG giữa chừng, khiến JSON.parse() lỗi (hoặc validateGeneratedTest() không qua vì
+// thiếu trường), và hệ thống sẽ ÂM THẦM rơi về DEFAULT_ACDI_GROUPS/DEFAULT_SCENARIOS (bộ đề mặc định
+// cứng trong code) — đây chính là nguyên nhân hay gặp khi thấy đề luôn giống nhau/đơn giản bất thường.
+export async function generateTestWithAI(criteria) {
+  // Prompt soạn đề nằm ở n8n (phía server). Cần mật khẩu admin (lưu tạm trong sessionStorage khi mở khoá admin.html).
+  let adminSecret = "";
+  try { adminSecret = sessionStorage.getItem("acdi_admin_pw") || ""; } catch { adminSecret = ""; }
+  const raw = await askAcdiGateway({
+    mode: "generate_test",
+    params: { schoolLevel: criteria.schoolLevel, grade: String(criteria.grade), subjects: criteria.subjects || [] },
+    adminSecret,
+    timeoutMs: 120000,
+  });
+  const cleaned = String(raw).replace(/```json|```/g, "").trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (e) {
+    // In log đủ để chẩn đoán: độ dài phản hồi + đoạn cuối (nếu bị cắt ngang do hết token, đoạn cuối
+    // thường dở dang, không đóng ngoặc) — xem console để biết chắc có phải do bị cắt hay không.
+    console.error(`Không parse được JSON đề thi từ AI (độ dài phản hồi: ${cleaned.length} ký tự). 300 ký tự cuối:`, cleaned.slice(-300));
+    throw new Error("Không parse được JSON đề thi từ AI: " + cleaned.slice(0, 300));
+  }
+  if (!validateGeneratedTest(parsed)) {
+    console.error("Đề thi AI trả về không đúng cấu trúc yêu cầu. Dữ liệu nhận được:", parsed);
+    throw new Error("Đề thi AI trả về không đúng cấu trúc yêu cầu.");
+  }
+  return { groups: parsed.groups, scenarios: parsed.scenarios };
+}
+
+// ============ 8. FIRESTORE — LƯU / ĐỌC KẾT QUẢ ============
+// Không có đăng nhập/tài khoản trong hệ thống BalanceAI — mỗi bài nộp chỉ gắn với participantCode
+// (mã ẩn danh do trình duyệt tự sinh), không lưu bất kỳ thông tin định danh cá nhân nào khác.
+export async function saveAssessment(data) {
+  const ref = await addDoc(collection(db, "assessments"), {
+    ...data,
+    createdAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+// Trang Dữ liệu (chỉ nhóm nghiên cứu, yêu cầu mã truy cập — xem mục 9): lấy toàn bộ kết quả khảo sát.
+export async function listAssessments() {
+  const snap = await getDocs(query(collection(db, "assessments"), orderBy("createdAt", "desc")));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+// ============ 8b. ẢNH CHỤP CÂU HỎI + ĐÁP ÁN CHI TIẾT CỦA TỪNG HỌC SINH ============
+// Trước đây bài nộp chỉ lưu mã câu hỏi -> giá trị (vd "g1q1": 4) nên không thể biết câu hỏi nói gì
+// (id trùng giữa các môn, đề trong ngân hàng lại có thể được sửa về sau). Giờ mỗi bài nộp lưu kèm
+// "responses": nguyên văn từng câu hỏi, nhãn đáp án đã chọn, câu trả lời tự luận và điểm từng tình huống.
+export function buildResponseDetails({ groups, scenarios, answers, scenarioAnswers, perScenario }) {
+  const labelOf = (v) => LIKERT_OPTIONS.find((o) => o.value === Number(v))?.label || "";
+  const questions = [];
+  (groups || []).forEach((g) => {
+    g.questions.forEach((q, qi) => {
+      const v = answers?.[q.id];
+      questions.push({
+        id: q.id, groupKey: g.key, groupTitle: g.title, index: qi + 1,
+        text: q.text, reverse: !!q.reverse,
+        value: v === undefined ? null : Number(v), label: v === undefined ? "" : labelOf(v),
+      });
+    });
+  });
+  const scenarioList = (scenarios || []).map((sc) => ({
+    id: sc.id, title: sc.title || "", prompt: sc.prompt || "", aiAnswer: sc.aiAnswer || "",
+    question: sc.question || "", answer: String(scenarioAnswers?.[sc.id] ?? ""),
+    score: perScenario?.[sc.id] ?? null,
+  }));
+  return { questions, scenarios: scenarioList };
+}
+
+// ============ 9. HỆ THỐNG KEY TRUY CẬP TRANG DỮ LIỆU (chỉ nhóm nghiên cứu) ============
+// Trang balance-data.html giờ yêu cầu một "key" hợp lệ mới xem được (thay vì công khai hoàn toàn).
+// Key được quản trị viên tạo ở trang admin.html (ẩn, vào bằng mật khẩu tĩnh, không có tài khoản).
+// Mỗi key giới hạn số lượng TRÌNH DUYỆT (thiết bị) được phép dùng — trình duyệt đầu tiên nhập key
+// sẽ được "gắn" vào key đó (ghi nhận deviceId), tới khi đủ số lượng cho phép thì trình duyệt mới
+// không nhập được nữa. Quản trị viên có thể đổi số lượng thiết bị tối đa / hạn dùng bất cứ lúc nào.
+// Lưu tại Firestore: acdiAccessKeys/{keyCode}
+//   { name, keyCode, maxDevices, deviceIds: string[], expiresAt: ISO string | null, createdAt }
+
+const KEY_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export function generateKeyCode(len = 10) {
+  let out = "";
+  for (let i = 0; i < len; i++) out += KEY_CHARS[Math.floor(Math.random() * KEY_CHARS.length)];
+  return out;
+}
+
+// Định danh trình duyệt: 1 chuỗi ngẫu nhiên sinh ra 1 lần, lưu vĩnh viễn trong localStorage của
+// trình duyệt đó. Đây KHÔNG phải định danh cá nhân — chỉ là mã kỹ thuật của trình duyệt/máy để
+// đếm số "chỗ" đã dùng của 1 key, tương tự cách participantCode ẩn danh hoá người làm khảo sát.
+export function getOrCreateDeviceId() {
+  let id = null;
+  try { id = localStorage.getItem("acdi_device_id"); } catch { id = null; }
+  if (!id) {
+    id = "dev_" + Array.from({ length: 20 }, () => KEY_CHARS[Math.floor(Math.random() * KEY_CHARS.length)]).join("");
+    try { localStorage.setItem("acdi_device_id", id); } catch { /* ignore */ }
+  }
+  return id;
+}
+
+// Tạo key mới (dùng ở trang admin). expiresAt: chuỗi "YYYY-MM-DD" hoặc null (không hết hạn).
+export async function createAccessKey({ name, maxDevices, expiresAt }) {
+  const keyCode = generateKeyCode();
+  await setDoc(doc(db, "acdiAccessKeys", keyCode), {
+    name: name || "",
+    keyCode,
+    maxDevices: Math.max(1, Number(maxDevices) || 1),
+    deviceIds: [],
+    expiresAt: expiresAt || null,
+    createdAt: serverTimestamp(),
+  });
+  return keyCode;
+}
+
+// Sửa số lượng thiết bị tối đa và/hoặc hạn dùng của 1 key đã tạo (không đổi được keyCode/deviceIds).
+export async function updateAccessKey(keyCode, { maxDevices, expiresAt }) {
+  const patch = {};
+  if (maxDevices !== undefined) patch.maxDevices = Math.max(1, Number(maxDevices) || 1);
+  if (expiresAt !== undefined) patch.expiresAt = expiresAt || null;
+  await setDoc(doc(db, "acdiAccessKeys", keyCode), patch, { merge: true });
+}
+
+// Xoá hẳn 1 key (thu hồi quyền truy cập ngay lập tức cho mọi thiết bị đang dùng key đó).
+export async function deleteAccessKey(keyCode) {
+  await setDoc(doc(db, "acdiAccessKeys", keyCode), { revoked: true, deviceIds: [], maxDevices: 0 }, { merge: true });
+}
+
+// Danh sách toàn bộ key (dùng ở trang admin).
+export async function listAccessKeys() {
+  const snap = await getDocs(query(collection(db, "acdiAccessKeys"), orderBy("createdAt", "desc")));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+// Kiểm tra + đăng ký thiết bị hiện tại vào 1 key. Trả về { ok: true } nếu hợp lệ (và ghi nhận thiết
+// bị nếu là lần đầu dùng key này); trả về { ok: false, reason } nếu sai key / hết hạn / hết chỗ.
+export async function validateAndRegisterKey(rawKeyCode) {
+  const keyCode = String(rawKeyCode || "").trim().toUpperCase();
+  if (!keyCode) return { ok: false, reason: "empty" };
+
+  const ref = doc(db, "acdiAccessKeys", keyCode);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return { ok: false, reason: "not_found" };
+
+  const data = snap.data();
+  if (data.revoked) return { ok: false, reason: "revoked" };
+  if (data.expiresAt) {
+    const exp = new Date(data.expiresAt + "T23:59:59");
+    if (!isNaN(exp.getTime()) && Date.now() > exp.getTime()) return { ok: false, reason: "expired" };
+  }
+
+  const deviceId = getOrCreateDeviceId();
+  const deviceIds = Array.isArray(data.deviceIds) ? data.deviceIds : [];
+  if (deviceIds.includes(deviceId)) return { ok: true, keyCode }; // thiết bị này đã từng dùng key -> luôn cho vào lại
+
+  const maxDevices = Number(data.maxDevices) || 0;
+  if (deviceIds.length >= maxDevices) return { ok: false, reason: "device_limit" };
+
+  try {
+    await setDoc(ref, { deviceIds: [...deviceIds, deviceId] }, { merge: true });
+  } catch (err) {
+    console.warn("Không ghi nhận được thiết bị mới cho key:", err);
+  }
+  return { ok: true, keyCode };
+}
+
+// Trang balance-data.html gọi hàm này khi tải trang để kiểm tra xem trình duyệt hiện tại đã có
+// key hợp lệ lưu từ trước hay chưa (không bắt nhập lại key mỗi lần vào trang).
+export async function checkStoredKeyStillValid() {
+  let stored = null;
+  try { stored = localStorage.getItem("acdi_data_key"); } catch { stored = null; }
+  if (!stored) return false;
+  const res = await validateAndRegisterKey(stored);
+  return !!res.ok;
+}
+
+// Gộp số liệu thống kê hiển thị (đếm, điểm trung bình, phân bố mức, điểm TB từng nhóm chỉ báo).
+export function summarizeAssessments(rows) {
+  const count = rows.length;
+  const avgAcdi = count ? Math.round((rows.reduce((s, r) => s + (r.acdiScore || 0), 0) / count) * 10) / 10 : 0;
+  const levelCounts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  rows.forEach((r) => { if (r.acdiLevel >= 1 && r.acdiLevel <= 4) levelCounts[r.acdiLevel]++; });
+
+  const dimKeys = ["start", "idea", "process", "trust", "independence"];
+  const dimAvg = {};
+  dimKeys.forEach((k) => {
+    const vals = rows.map((r) => r.dimensionScores?.[k]).filter((v) => typeof v === "number");
+    dimAvg[k] = vals.length ? Math.round((vals.reduce((s, x) => s + x, 0) / vals.length) * 10) / 10 : 0;
+  });
+
+  return { count, avgAcdi, levelCounts, dimAvg };
+}

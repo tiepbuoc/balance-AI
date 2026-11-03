@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>BalanceAI — Quản trị</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%96%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css" />
+<style>
+  .login-wrap{ max-width:380px; margin:80px auto; text-align:center; }
+  .login-wrap i.fa-user-shield{ font-size:26px; color:var(--orange2); margin-bottom:14px; display:block; }
+  .login-wrap input{
+    width:100%; padding:12px 14px; border:1.5px solid var(--border); border-radius:14px;
+    font-size:14px; font-family:'Be Vietnam Pro',sans-serif; margin-top:16px; text-align:center;
+  }
+  .login-wrap .login-msg{ font-size:12.5px; color:var(--red); min-height:16px; margin-top:10px; }
+  .login-wrap button{ margin-top:14px; width:100%; }
+
+  .admin-wrap{ max-width:960px; margin:32px auto; padding:0 20px; display:none; }
+  .create-form{ display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:10px; align-items:end; }
+  .create-form label{ font-size:11px; font-weight:700; color:var(--text-mid); display:block; margin-bottom:5px; }
+  .create-form input{
+    width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:12px;
+    font-size:13px; font-family:'Be Vietnam Pro',sans-serif;
+  }
+  @media (max-width:720px){ .create-form{ grid-template-columns:1fr; } }
+
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; margin-top:20px; }
+  th,td{ text-align:left; padding:10px 8px; border-bottom:1px solid var(--border); }
+  th{ font-size:10.5px; color:var(--text-mid); font-weight:700; text-transform:uppercase; letter-spacing:0.5px; }
+  .key-code{ font-family:monospace; font-weight:700; letter-spacing:1px; }
+  .row-input{ width:64px; padding:6px 8px; border:1.5px solid var(--border); border-radius:8px; font-size:12.5px; }
+  .row-date{ padding:6px 8px; border:1.5px solid var(--border); border-radius:8px; font-size:12px; }
+  .tiny-btn{
+    padding:6px 12px; border:1.5px solid var(--border); border-radius:10px; background:#fff;
+    font-size:11.5px; font-weight:700; cursor:pointer; color:var(--text-dark);
+  }
+  .tiny-btn:hover{ border-color:var(--orange); color:var(--orange2); }
+  .tiny-btn.danger:hover{ border-color:var(--red); color:var(--red); }
+  .pill-status{ font-size:10.5px; font-weight:700; padding:3px 10px; border-radius:999px; color:#fff; }
+
+  .admin-tabs{ display:flex; gap:8px; margin-bottom:20px; border-bottom:1.5px solid var(--border); }
+  .admin-tab-btn{
+    padding:10px 16px; border:none; background:none; font-size:13px; font-weight:700; color:var(--text-mid);
+    cursor:pointer; border-bottom:2.5px solid transparent; margin-bottom:-1.5px;
+  }
+  .admin-tab-btn.active{ color:var(--orange2); border-bottom-color:var(--orange2); }
+  .tab-panel{ display:none; }
+  .tab-panel.active{ display:block; }
+
+  .bank-select-row{ display:flex; gap:10px; flex-wrap:wrap; align-items:end; margin-bottom:16px; }
+  .bank-select-row label{ font-size:11px; font-weight:700; color:var(--text-mid); display:block; margin-bottom:5px; }
+  .bank-select-row select{
+    padding:10px 12px; border:1.5px solid var(--border); border-radius:12px; font-size:13px;
+    font-family:'Be Vietnam Pro',sans-serif; background:#fff; min-width:150px;
+  }
+  .bank-status-badge{ font-size:11px; font-weight:700; padding:4px 12px; border-radius:999px; }
+  .bank-status-badge.has-bank{ background:var(--green-pale); color:var(--green); }
+  .bank-status-badge.no-bank{ background:var(--red-pale); color:var(--red); }
+
+  .edit-group-card{ border:1.5px solid var(--border); border-radius:16px; padding:16px; margin-bottom:14px; }
+  .edit-group-card .g-head{ display:flex; gap:10px; margin-bottom:10px; }
+  .edit-group-card .g-head input{ flex:1; padding:8px 10px; border:1.5px solid var(--border); border-radius:10px; font-size:12.5px; }
+  .edit-q-row{ display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+  .edit-q-row textarea{
+    flex:1; padding:8px 10px; border:1.5px solid var(--border); border-radius:10px; font-size:12.5px;
+    font-family:'Be Vietnam Pro',sans-serif; resize:vertical; min-height:38px;
+  }
+  .edit-q-row label{ font-size:10.5px; color:var(--text-mid); display:flex; align-items:center; gap:4px; white-space:nowrap; }
+
+  .edit-sc-card{ border:1.5px solid var(--border); border-radius:16px; padding:16px; margin-bottom:14px; }
+  .edit-sc-card .f-label{ font-size:10.5px; font-weight:700; color:var(--text-mid); margin:10px 0 5px; text-transform:uppercase; letter-spacing:0.5px; }
+  .edit-sc-card .f-label:first-child{ margin-top:0; }
+  .edit-sc-card input[type=text], .edit-sc-card textarea{
+    width:100%; padding:8px 10px; border:1.5px solid var(--border); border-radius:10px; font-size:12.5px;
+    font-family:'Be Vietnam Pro',sans-serif; resize:vertical;
+  }
+  .kp-row{ display:flex; gap:6px; margin-bottom:6px; }
+  .kp-row input{ padding:7px 9px; border:1.5px solid var(--border); border-radius:8px; font-size:12px; }
+  .kp-row .kp-label{ flex:1; }
+  .kp-row .kp-keywords{ flex:2; }
+  .kp-row button{ padding:0 10px; border:1.5px solid var(--border); border-radius:8px; background:#fff; cursor:pointer; color:var(--red); }
+  .add-kp-btn{ font-size:11.5px; font-weight:700; color:var(--orange2); background:none; border:none; cursor:pointer; padding:4px 0; }
+
+  .bank-overview-table td, .bank-overview-table th{ font-size:12px; }
+
+  .back-link{
+    display:inline-flex; align-items:center; gap:8px; text-decoration:none; font-size:12.5px; font-weight:700;
+    color:var(--text-mid); padding:8px 14px; border:1.5px solid var(--border); border-radius:12px; background:#fff;
+  }
+  .back-link:hover{ border-color:var(--orange); color:var(--orange2); }
+  .admin-topbar{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  .admin-topbar .section-label{ margin-bottom:0; }
+  .export-row{ display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+  .export-row label{ font-size:11px; font-weight:700; color:var(--text-mid); display:block; margin-bottom:5px; }
+  .export-row select{
+    padding:10px 12px; border:1.5px solid var(--border); border-radius:12px; font-size:13px;
+    font-family:'Be Vietnam Pro',sans-serif; background:#fff; min-width:200px;
+  }
+
+  .genall-card{ margin-top:18px; }
+  .genall-progress{
+    display:none; margin-top:12px; max-height:220px; overflow-y:auto;
+    border:1.5px solid var(--border); border-radius:12px; padding:10px 12px;
+    font-size:12px; font-family:monospace; background:#fafafa;
+  }
+  .genall-progress div{ padding:2px 0; }
+</style>
+</head>
+<body>
+
+<div id="loginWrap" class="card login-wrap">
+  <i class="fa-solid fa-user-shield"></i>
+  <h2 class="section-title" style="font-size:16px;">Quản trị BalanceAI</h2>
+  <p style="font-size:12.5px; color:var(--text-mid);">Nhập mật khẩu quản trị để tiếp tục.</p>
+  <input type="password" id="pwInput" placeholder="Mật khẩu" />
+  <div class="login-msg" id="loginMsg"></div>
+  <button class="acdi-btn-primary" id="loginBtn" style="width:100%;">Đăng nhập</button>
+  <a href="index.html" class="back-link" style="margin-top:14px;"><i class="fa-solid fa-arrow-left"></i> Về trang chủ</a>
+</div>
+
+<div id="adminWrap" class="admin-wrap" style="max-width:1000px;">
+  <div class="admin-topbar">
+    <div class="section-label"><i class="fa-solid fa-scale-balanced"></i> Quản trị BalanceAI</div>
+    <a href="index.html" class="back-link"><i class="fa-solid fa-arrow-left"></i> Về trang chủ</a>
+  </div>
+
+  <div class="admin-tabs">
+    <button class="admin-tab-btn active" data-tab="keysTab">Mã truy cập dữ liệu</button>
+    <button class="admin-tab-btn" data-tab="testsTab">Quản trị đề khảo sát</button>
+  </div>
+
+  <div id="keysTab" class="tab-panel active">
+    <h2 class="section-title" style="margin-bottom:4px;">Quản lý mã truy cập trang Dữ liệu</h2>
+    <p style="font-size:12.5px; color:var(--text-mid); margin-bottom:16px;">Tạo mã truy cập để cấp cho từng nhóm/người trong nhóm nghiên cứu vào xem trang Dữ liệu. Mỗi mã giới hạn số trình duyệt được phép dùng — trình duyệt đầu tiên nhập mã sẽ được gắn cố định vào mã đó cho tới khi đạt giới hạn.</p>
+
+    <div class="card">
+      <h3 class="section-title" style="font-size:14px; margin-bottom:14px;">Tạo mã mới</h3>
+      <div class="create-form">
+        <div>
+          <label>Tên mã (để dễ nhận biết)</label>
+          <input type="text" id="newKeyName" placeholder="Ví dụ: Nhóm nghiên cứu A" />
+        </div>
+        <div>
+          <label>Số trình duyệt tối đa</label>
+          <input type="number" id="newKeyMax" value="1" min="1" />
+        </div>
+        <div>
+          <label>Hạn dùng (để trống = không hết hạn)</label>
+          <input type="date" id="newKeyExpiry" />
+        </div>
+        <button class="acdi-btn-primary" id="createKeyBtn">Tạo mã</button>
+      </div>
+      <div id="createMsg" style="font-size:12.5px; color:var(--red); min-height:16px; margin-top:10px;"></div>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h3 class="section-title" style="font-size:14px;">Danh sách mã đã tạo</h3>
+      <div class="table-scroll" style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr><th>Mã</th><th>Tên</th><th>Trình duyệt đang dùng</th><th>Số lượng tối đa</th><th>Hạn dùng</th><th>Trạng thái</th><th></th></tr>
+          </thead>
+          <tbody id="keysBody"></tbody>
+        </table>
+        <div id="keysEmpty" style="display:none; text-align:center; padding:24px; color:var(--text-mid); font-size:13px;">Chưa có mã nào được tạo.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="testsTab" class="tab-panel">
+    <h2 class="section-title" style="margin-bottom:4px;">Quản trị đề khảo sát (ngân hàng theo lớp + môn)</h2>
+    <p style="font-size:12.5px; color:var(--text-mid); margin-bottom:16px;">Mỗi (khối lớp, môn học) có một bộ đề riêng gồm 25 câu trắc nghiệm (5 nhóm × 5 câu) + 5 tình huống tự luận. Khi học sinh làm khảo sát, hệ thống lấy đề từ đây để lắp ráp — không tự gọi AI. Chọn khối lớp + môn học bên dưới để xem/sửa đề, hoặc bấm "Tạo nhanh bằng AI" để soạn mới.</p>
+
+    <div class="card">
+      <div class="bank-select-row">
+        <div>
+          <label>Cấp học</label>
+          <select id="bankSchoolLevel">
+            <option value="thcs">THCS</option>
+            <option value="thpt">THPT</option>
+          </select>
+        </div>
+        <div>
+          <label>Khối lớp</label>
+          <select id="bankGrade"></select>
+        </div>
+        <div>
+          <label>Môn học</label>
+          <select id="bankSubject"></select>
+        </div>
+        <span id="bankStatusBadge" class="bank-status-badge no-bank">Chưa có đề</span>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="acdi-btn-secondary" id="genAiBtn"><i class="fa-solid fa-wand-magic-sparkles"></i> Tạo nhanh bằng AI</button>
+        <button class="acdi-btn-secondary" id="newManualBtn"><i class="fa-solid fa-pen"></i> Soạn tay từ đầu</button>
+        <button class="acdi-btn-secondary" id="deleteBankBtn" style="color:var(--red); border-color:var(--red);"><i class="fa-solid fa-trash"></i> Xoá đề này</button>
+      </div>
+      <div id="bankMsg" style="font-size:12.5px; color:var(--red); min-height:18px; margin-top:10px;"></div>
+    </div>
+
+    <div id="bankEditWrap" style="display:none; margin-top:18px;">
+      <div class="card">
+        <h3 class="section-title" style="font-size:14px;">25 câu trắc nghiệm (5 nhóm × 5 câu)</h3>
+        <div id="groupsEditWrap"></div>
+      </div>
+      <div class="card" style="margin-top:18px;">
+        <h3 class="section-title" style="font-size:14px;">5 tình huống tự luận</h3>
+        <div id="scenariosEditWrap"></div>
+      </div>
+      <div style="margin:18px 0; text-align:right;">
+        <button class="acdi-btn-primary" id="saveBankBtn">Lưu đề vào ngân hàng</button>
+      </div>
+    </div>
+
+    <div class="card genall-card">
+      <h3 class="section-title" style="font-size:14px;">Tạo toàn bộ đề còn thiếu</h3>
+      <p style="font-size:12.5px; color:var(--text-mid); margin-bottom:12px;">
+        Quét tất cả khối lớp (6–9 THCS, 10–12 THPT) × tất cả môn, tự động gọi AI soạn đề cho những đề chưa có, lưu vào ngân hàng. Nếu lỗi sẽ tự thử lại rồi bỏ qua và tiếp tục đề kế tiếp.
+      </p>
+      <button class="acdi-btn-secondary" id="genAllMissingBtn"><i class="fa-solid fa-bolt"></i> Tạo toàn bộ đề còn thiếu (AI)</button>
+      <div id="genAllProgress" class="genall-progress"></div>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h3 class="section-title" style="font-size:14px;">Xuất ngân hàng câu hỏi</h3>
+      <p style="font-size:12.5px; color:var(--text-mid); margin-bottom:12px;">
+        Xuất nội dung các đề đã lưu trong ngân hàng (câu trắc nghiệm, tình huống tự luận kèm ý chính và từ khoá rủi ro) ra file.
+        File Excel tách thành 2 sheet (Trắc nghiệm / Tự luận); file CSV gộp chung trong một bảng, có cột "Loại câu" để phân biệt.
+      </p>
+      <div class="export-row">
+        <div>
+          <label>Phạm vi xuất</label>
+          <select id="exportScope">
+            <option value="all">Toàn bộ ngân hàng đề</option>
+            <option value="selected">Chỉ đề đang chọn ở trên (lớp + môn)</option>
+          </select>
+        </div>
+        <button class="acdi-btn-secondary" id="exportBankCsvBtn"><i class="fa-solid fa-file-csv"></i> Xuất CSV</button>
+        <button class="acdi-btn-secondary" id="exportBankXlsxBtn"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
+      </div>
+      <div id="exportMsg" style="font-size:12.5px; min-height:18px; margin-top:10px;"></div>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h3 class="section-title" style="font-size:14px;">Tổng quan ngân hàng đề đã có</h3>
+      <div class="table-scroll" style="overflow-x:auto;">
+        <table class="bank-overview-table">
+          <thead><tr><th>Khối lớp</th><th>Môn</th><th>Số câu TN</th><th>Số tình huống</th><th>Cập nhật</th></tr></thead>
+          <tbody id="bankOverviewBody"></tbody>
+        </table>
+        <div id="bankOverviewEmpty" style="display:none; text-align:center; padding:20px; color:var(--text-mid); font-size:13px;">Ngân hàng đề chưa có dữ liệu nào.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script type="module">
+import { downloadCSV, downloadXLSX, todayStamp } from "./balance-export.js";
+import {
+  createAccessKey, updateAccessKey, deleteAccessKey, listAccessKeys,
+  GROUP_DEFS, SUBJECT_LABELS, SUBJECT_KEYS, getTestBank, saveTestBank, deleteTestBank,
+  listTestBankMeta, generateSubjectTestWithAI, validateGeneratedTest, listAllTestBanks,
+} from "./balance-shared.js";
+
+// Mật khẩu tĩnh — trang admin KHÔNG dùng tài khoản/đăng nhập thật, chỉ chặn truy cập tình cờ.
+const ADMIN_PASSWORD = "nhat1234";
+
+const loginWrap = document.getElementById("loginWrap");
+const adminWrap = document.getElementById("adminWrap");
+const pwInput = document.getElementById("pwInput");
+const loginMsg = document.getElementById("loginMsg");
+const loginBtn = document.getElementById("loginBtn");
+
+function unlockAdmin() {
+  try { sessionStorage.setItem("acdi_admin_ok", "1"); } catch { /* ignore */ }
+  loginWrap.style.display = "none";
+  adminWrap.style.display = "block";
+  loadKeys();
+  initBankTab();
+}
+
+loginBtn.onclick = () => {
+  if (pwInput.value === ADMIN_PASSWORD) {
+    // Giữ mật khẩu trong phiên để gửi kèm khi soạn đề bằng AI — n8n kiểm tra lại ở phía server.
+    try { sessionStorage.setItem("acdi_admin_pw", pwInput.value); } catch { /* ignore */ }
+    unlockAdmin(); return;
+  }
+  loginMsg.textContent = "Sai mật khẩu.";
+};
+pwInput.addEventListener("keydown", (e) => { if (e.key === "Enter") loginBtn.click(); });
+
+let alreadyOk = false;
+try { alreadyOk = sessionStorage.getItem("acdi_admin_ok") === "1"; } catch { alreadyOk = false; }
+if (alreadyOk) unlockAdmin();
+
+document.querySelectorAll(".admin-tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".admin-tab-btn").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById(btn.getAttribute("data-tab")).classList.add("active");
+  });
+});
+
+// ============ Quản lý key ============
+const keysBody = document.getElementById("keysBody");
+const keysEmpty = document.getElementById("keysEmpty");
+const createMsg = document.getElementById("createMsg");
+
+function statusOf(k) {
+  if (k.revoked) return { label: "Đã thu hồi", color: "#95a5a6" };
+  if (k.expiresAt) {
+    const exp = new Date(k.expiresAt + "T23:59:59");
+    if (!isNaN(exp.getTime()) && Date.now() > exp.getTime()) return { label: "Hết hạn", color: "#e74c3c" };
+  }
+  const used = Array.isArray(k.deviceIds) ? k.deviceIds.length : 0;
+  if (used >= (Number(k.maxDevices) || 0)) return { label: "Đã đầy", color: "#f39c12" };
+  return { label: "Đang hoạt động", color: "#1f9d6c" };
+}
+
+async function loadKeys() {
+  const keys = await listAccessKeys().catch(() => []);
+  if (keys.length === 0) {
+    keysBody.innerHTML = "";
+    keysEmpty.style.display = "block";
+    return;
+  }
+  keysEmpty.style.display = "none";
+  keysBody.innerHTML = keys.map((k) => {
+    const st = statusOf(k);
+    const used = Array.isArray(k.deviceIds) ? k.deviceIds.length : 0;
+    return `
+      <tr data-key="${k.keyCode}">
+        <td class="key-code">${k.keyCode}</td>
+        <td>${k.name || "-"}</td>
+        <td>${used}</td>
+        <td><input class="row-input maxInput" type="number" min="1" value="${k.maxDevices ?? 1}" /></td>
+        <td><input class="row-date expiryInput" type="date" value="${k.expiresAt || ""}" /></td>
+        <td><span class="pill-status" style="background:${st.color}">${st.label}</span></td>
+        <td style="white-space:nowrap;">
+          <button class="tiny-btn saveBtn">Lưu</button>
+          <button class="tiny-btn danger revokeBtn">Thu hồi</button>
+        </td>
+      </tr>`;
+  }).join("");
+
+  keysBody.querySelectorAll("tr").forEach((tr) => {
+    const keyCode = tr.getAttribute("data-key");
+    tr.querySelector(".saveBtn").onclick = async () => {
+      const maxDevices = tr.querySelector(".maxInput").value;
+      const expiresAt = tr.querySelector(".expiryInput").value || null;
+      await updateAccessKey(keyCode, { maxDevices, expiresAt });
+      loadKeys();
+    };
+    tr.querySelector(".revokeBtn").onclick = async () => {
+      if (!confirm(`Thu hồi mã ${keyCode}? Mọi trình duyệt đang dùng mã này sẽ mất quyền truy cập ngay.`)) return;
+      await deleteAccessKey(keyCode);
+      loadKeys();
+    };
+  });
+}
+
+document.getElementById("createKeyBtn").onclick = async () => {
+  const name = document.getElementById("newKeyName").value.trim();
+  const maxDevices = document.getElementById("newKeyMax").value;
+  const expiresAt = document.getElementById("newKeyExpiry").value || null;
+  createMsg.style.color = "var(--red)";
+  createMsg.textContent = "Đang tạo...";
+  try {
+    const keyCode = await createAccessKey({ name, maxDevices, expiresAt });
+    createMsg.style.color = "var(--green)";
+    createMsg.textContent = `Đã tạo mã: ${keyCode}`;
+    document.getElementById("newKeyName").value = "";
+    document.getElementById("newKeyMax").value = "1";
+    document.getElementById("newKeyExpiry").value = "";
+    loadKeys();
+  } catch (err) {
+    console.warn("Không tạo được mã:", err);
+    createMsg.style.color = "var(--red)";
+    createMsg.textContent = "Có lỗi khi tạo mã, vui lòng thử lại.";
+  }
+};
+
+// ============ Quản trị đề khảo sát ============
+const bankSchoolLevelEl = document.getElementById("bankSchoolLevel");
+const bankGradeEl = document.getElementById("bankGrade");
+const bankSubjectEl = document.getElementById("bankSubject");
+const bankStatusBadge = document.getElementById("bankStatusBadge");
+const bankMsg = document.getElementById("bankMsg");
+const bankEditWrap = document.getElementById("bankEditWrap");
+const groupsEditWrap = document.getElementById("groupsEditWrap");
+const scenariosEditWrap = document.getElementById("scenariosEditWrap");
+const genAiBtn = document.getElementById("genAiBtn");
+const newManualBtn = document.getElementById("newManualBtn");
+const deleteBankBtn = document.getElementById("deleteBankBtn");
+const saveBankBtn = document.getElementById("saveBankBtn");
+const bankOverviewBody = document.getElementById("bankOverviewBody");
+const bankOverviewEmpty = document.getElementById("bankOverviewEmpty");
+
+bankSubjectEl.innerHTML = SUBJECT_KEYS.map((k) => `<option value="${k}">${SUBJECT_LABELS[k]}</option>`).join("");
+
+function gradesFor(level) { return level === "thcs" ? [6, 7, 8, 9] : [10, 11, 12]; }
+function renderBankGrades() {
+  bankGradeEl.innerHTML = gradesFor(bankSchoolLevelEl.value).map((g) => `<option value="${g}">Lớp ${g}</option>`).join("");
+}
+bankSchoolLevelEl.onchange = () => { renderBankGrades(); loadCurrentBank(); };
+bankGradeEl.onchange = loadCurrentBank;
+bankSubjectEl.onchange = loadCurrentBank;
+renderBankGrades();
+
+function emptyGroupsTemplate() {
+  return GROUP_DEFS.map((gd) => ({
+    key: gd.key, title: gd.title, desc: gd.desc,
+    questions: Array.from({ length: 5 }, (_, i) => ({ id: `g_${gd.key}_q${i + 1}`, text: "", reverse: gd.key === "independence" })),
+  }));
+}
+function emptyScenariosTemplate() {
+  return Array.from({ length: 5 }, (_, i) => ({
+    id: `s${i + 1}`, title: `Tình huống ${i + 1}`, prompt: "", aiAnswer: "", question: "", type: "text",
+    keyPoints: [{ label: "", keywords: [] }, { label: "", keywords: [] }],
+    riskKeywords: [],
+  }));
+}
+
+let currentBankData = null; // { groups, scenarios } đang hiển thị trong form (chưa chắc đã lưu)
+
+function renderGroupsEdit(groups) {
+  groupsEditWrap.innerHTML = groups.map((g, gi) => `
+    <div class="edit-group-card" data-gindex="${gi}">
+      <div class="g-head">
+        <input type="text" class="g-title" value="${escapeAttr(g.title)}" placeholder="Tên nhóm" />
+        <input type="text" class="g-desc" value="${escapeAttr(g.desc)}" placeholder="Mô tả nhóm" />
+      </div>
+      ${g.questions.map((q, qi) => `
+        <div class="edit-q-row" data-qindex="${qi}">
+          <textarea class="q-text" placeholder="Câu hỏi ${qi + 1}">${escapeHtml(q.text)}</textarea>
+          <label><input type="checkbox" class="q-reverse" ${q.reverse ? "checked" : ""} /> đảo điểm</label>
+        </div>
+      `).join("")}
+    </div>
+  `).join("");
+}
+
+function renderScenariosEdit(scenarios) {
+  scenariosEditWrap.innerHTML = scenarios.map((sc, si) => `
+    <div class="edit-sc-card" data-sindex="${si}">
+      <div class="f-label">Tiêu đề tình huống ${si + 1}</div>
+      <input type="text" class="sc-title" value="${escapeAttr(sc.title)}" />
+      <div class="f-label">Bối cảnh / prompt</div>
+      <textarea class="sc-prompt" rows="2">${escapeHtml(sc.prompt || "")}</textarea>
+      <div class="f-label">Câu trả lời của AI (nếu có)</div>
+      <textarea class="sc-aiAnswer" rows="2">${escapeHtml(sc.aiAnswer || "")}</textarea>
+      <div class="f-label">Câu hỏi cho học sinh</div>
+      <textarea class="sc-question" rows="2">${escapeHtml(sc.question || "")}</textarea>
+      <div class="f-label">Ý chính cần có (keyPoints) — nhãn + từ khoá cách nhau bởi dấu phẩy</div>
+      <div class="kp-wrap">
+        ${(sc.keyPoints || []).map((kp) => `
+          <div class="kp-row">
+            <input type="text" class="kp-label" placeholder="Mô tả ý chính" value="${escapeAttr(kp.label)}" />
+            <input type="text" class="kp-keywords" placeholder="từ khoá 1, từ khoá 2, ..." value="${escapeAttr((kp.keywords || []).join(", "))}" />
+            <button type="button" class="kp-remove">✕</button>
+          </div>
+        `).join("")}
+      </div>
+      <button type="button" class="add-kp-btn">+ Thêm ý chính</button>
+      <div class="f-label">Từ khoá rủi ro (riskKeywords) — cách nhau bởi dấu phẩy</div>
+      <input type="text" class="sc-risk" value="${escapeAttr((sc.riskKeywords || []).join(", "))}" />
+    </div>
+  `).join("");
+
+  scenariosEditWrap.querySelectorAll(".edit-sc-card").forEach((card) => {
+    card.querySelector(".add-kp-btn").onclick = () => {
+      const wrap = card.querySelector(".kp-wrap");
+      const row = document.createElement("div");
+      row.className = "kp-row";
+      row.innerHTML = `<input type="text" class="kp-label" placeholder="Mô tả ý chính" /><input type="text" class="kp-keywords" placeholder="từ khoá 1, từ khoá 2, ..." /><button type="button" class="kp-remove">✕</button>`;
+      row.querySelector(".kp-remove").onclick = () => row.remove();
+      wrap.appendChild(row);
+    };
+    card.querySelectorAll(".kp-remove").forEach((btn) => { btn.onclick = () => btn.closest(".kp-row").remove(); });
+  });
+}
+
+function escapeHtml(s) { return String(s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+function escapeAttr(s) { return escapeHtml(s).replace(/"/g, "&quot;"); }
+
+function readGroupsFromForm() {
+  return Array.from(groupsEditWrap.querySelectorAll(".edit-group-card")).map((card, gi) => {
+    const gd = GROUP_DEFS[gi];
+    const questions = Array.from(card.querySelectorAll(".edit-q-row")).map((row, qi) => ({
+      id: `g${gi + 1}q${qi + 1}`,
+      text: row.querySelector(".q-text").value.trim(),
+      reverse: row.querySelector(".q-reverse").checked,
+    }));
+    return {
+      key: gd.key,
+      title: card.querySelector(".g-title").value.trim() || gd.title,
+      desc: card.querySelector(".g-desc").value.trim() || gd.desc,
+      questions,
+    };
+  });
+}
+
+function readScenariosFromForm() {
+  return Array.from(scenariosEditWrap.querySelectorAll(".edit-sc-card")).map((card, si) => {
+    const keyPoints = Array.from(card.querySelectorAll(".kp-row")).map((row) => ({
+      label: row.querySelector(".kp-label").value.trim(),
+      keywords: row.querySelector(".kp-keywords").value.split(",").map((s) => s.trim()).filter(Boolean),
+    })).filter((kp) => kp.label && kp.keywords.length > 0);
+    const riskKeywords = card.querySelector(".sc-risk").value.split(",").map((s) => s.trim()).filter(Boolean);
+    const aiAnswer = card.querySelector(".sc-aiAnswer").value.trim();
+    return {
+      id: `s${si + 1}`,
+      title: card.querySelector(".sc-title").value.trim() || `Tình huống ${si + 1}`,
+      prompt: card.querySelector(".sc-prompt").value.trim(),
+      ...(aiAnswer ? { aiAnswer } : {}),
+      question: card.querySelector(".sc-question").value.trim(),
+      type: "text",
+      keyPoints,
+      riskKeywords,
+    };
+  });
+}
+
+function showEditForm(groups, scenarios) {
+  currentBankData = { groups, scenarios };
+  renderGroupsEdit(groups);
+  renderScenariosEdit(scenarios);
+  bankEditWrap.style.display = "block";
+}
+
+async function loadCurrentBank() {
+  bankMsg.style.color = "var(--red)";
+  bankMsg.textContent = "";
+  bankEditWrap.style.display = "none";
+  const grade = bankGradeEl.value;
+  const subject = bankSubjectEl.value;
+  if (!grade || !subject) return;
+  const bank = await getTestBank(grade, subject);
+  if (bank) {
+    bankStatusBadge.textContent = "Đã có đề";
+    bankStatusBadge.className = "bank-status-badge has-bank";
+    showEditForm(bank.groups, bank.scenarios);
+  } else {
+    bankStatusBadge.textContent = "Chưa có đề";
+    bankStatusBadge.className = "bank-status-badge no-bank";
+  }
+}
+
+newManualBtn.onclick = () => {
+  bankMsg.textContent = "";
+  showEditForm(emptyGroupsTemplate(), emptyScenariosTemplate());
+};
+
+genAiBtn.onclick = async () => {
+  const schoolLevel = bankSchoolLevelEl.value;
+  const grade = bankGradeEl.value;
+  const subject = bankSubjectEl.value;
+  bankMsg.style.color = "var(--text-mid)";
+  bankMsg.textContent = "Đang soạn đề bằng AI, vui lòng đợi (có thể mất khoảng nửa phút)...";
+  genAiBtn.disabled = true;
+  try {
+    const generated = await generateSubjectTestWithAI({ schoolLevel, grade, subject });
+    showEditForm(generated.groups, generated.scenarios);
+    currentBankData.__aiGenerated = true;
+    bankMsg.style.color = "var(--green)";
+    bankMsg.textContent = "AI đã soạn xong — vui lòng xem lại nội dung bên dưới rồi bấm \"Lưu đề vào ngân hàng\" để áp dụng.";
+  } catch (err) {
+    console.warn("Soạn đề bằng AI thất bại:", err);
+    bankMsg.style.color = "var(--red)";
+    bankMsg.textContent = "Soạn đề bằng AI thất bại, vui lòng thử lại hoặc soạn tay.";
+  } finally {
+    genAiBtn.disabled = false;
+  }
+};
+
+deleteBankBtn.onclick = async () => {
+  const grade = bankGradeEl.value;
+  const subject = bankSubjectEl.value;
+  if (!confirm(`Xoá đề của Lớp ${grade} - ${SUBJECT_LABELS[subject]}? Không thể hoàn tác.`)) return;
+  await deleteTestBank(grade, subject);
+  bankEditWrap.style.display = "none";
+  loadCurrentBank();
+  loadBankOverview();
+};
+
+saveBankBtn.onclick = async () => {
+  const grade = bankGradeEl.value;
+  const subject = bankSubjectEl.value;
+  const groups = readGroupsFromForm();
+  const scenarios = readScenariosFromForm();
+
+  if (!validateGeneratedTest({ groups, scenarios })) {
+    bankMsg.style.color = "var(--red)";
+    bankMsg.textContent = "Đề chưa hợp lệ: cần đủ 5 nhóm × 5 câu (không để trống câu hỏi) và 5 tình huống có đủ câu hỏi + ít nhất 2 ý chính + ít nhất 2 từ khoá rủi ro mỗi tình huống.";
+    return;
+  }
+  bankMsg.style.color = "var(--text-mid)";
+  bankMsg.textContent = "Đang lưu...";
+  try {
+    await saveTestBank(grade, subject, { groups, scenarios, source: currentBankData?.__aiGenerated ? "ai" : "manual" });
+    bankMsg.style.color = "var(--green)";
+    bankMsg.textContent = "Đã lưu đề vào ngân hàng.";
+    loadCurrentBank();
+    loadBankOverview();
+  } catch (err) {
+    console.warn("Lưu đề thất bại:", err);
+    bankMsg.style.color = "var(--red)";
+    bankMsg.textContent = "Có lỗi khi lưu đề, vui lòng thử lại.";
+  }
+};
+
+async function loadBankOverview() {
+  const meta = await listTestBankMeta().catch(() => []);
+  if (meta.length === 0) {
+    bankOverviewBody.innerHTML = "";
+    bankOverviewEmpty.style.display = "block";
+    return;
+  }
+  bankOverviewEmpty.style.display = "none";
+  meta.sort((a, b) => (a.grade - b.grade) || String(a.subject).localeCompare(b.subject));
+  bankOverviewBody.innerHTML = meta.map((m) => `
+    <tr>
+      <td>Lớp ${m.grade}</td>
+      <td>${SUBJECT_LABELS[m.subject] || m.subject}</td>
+      <td>${m.questionCount}</td>
+      <td>${m.scenarioCount}</td>
+      <td>${m.updatedAt?.toDate ? m.updatedAt.toDate().toLocaleString("vi-VN") : "-"}</td>
+    </tr>
+  `).join("");
+}
+
+// ============ Tạo toàn bộ đề còn thiếu ============
+const genAllMissingBtn = document.getElementById("genAllMissingBtn");
+const genAllProgress = document.getElementById("genAllProgress");
+let genAllRunning = false;
+let genAllStopRequested = false;
+
+function allGradeSubjectCombos() {
+  const combos = [];
+  for (const level of ["thcs", "thpt"]) {
+    for (const g of gradesFor(level)) {
+      for (const subj of SUBJECT_KEYS) {
+        combos.push({ schoolLevel: level, grade: g, subject: subj });
+      }
+    }
+  }
+  return combos;
+}
+
+function logProgress(msg, color) {
+  const line = document.createElement("div");
+  line.textContent = msg;
+  if (color) line.style.color = color;
+  genAllProgress.appendChild(line);
+  genAllProgress.scrollTop = genAllProgress.scrollHeight;
+}
+
+async function generateAllMissing() {
+  if (genAllRunning) return;
+  genAllRunning = true;
+  genAllStopRequested = false;
+  genAllMissingBtn.textContent = "Đang tạo... (bấm để dừng)";
+  genAllProgress.innerHTML = "";
+  genAllProgress.style.display = "block";
+
+  const combos = allGradeSubjectCombos();
+  const existingMeta = await listTestBankMeta().catch(() => []);
+  const existingSet = new Set(existingMeta.map((m) => `${m.grade}__${m.subject}`));
+  const missing = combos.filter((c) => !existingSet.has(`${c.grade}__${c.subject}`));
+
+  if (missing.length === 0) {
+    logProgress("Tất cả các đề đã đầy đủ, không có đề nào thiếu.", "var(--green)");
+  } else {
+    logProgress(`Tìm thấy ${missing.length} đề còn thiếu. Bắt đầu tạo...`, "var(--text-mid)");
+  }
+
+  let doneCount = 0;
+  let failCount = 0;
+
+  for (const combo of missing) {
+    if (genAllStopRequested) {
+      logProgress("Đã dừng theo yêu cầu.", "var(--red)");
+      break;
+    }
+    const label = `Lớp ${combo.grade} - ${SUBJECT_LABELS[combo.subject]}`;
+    let attempt = 0;
+    let success = false;
+    while (!success && attempt < 3 && !genAllStopRequested) {
+      attempt++;
+      logProgress(`${label}: đang soạn (lần ${attempt})...`, "var(--text-mid)");
+      try {
+        const generated = await generateSubjectTestWithAI(combo);
+        if (!validateGeneratedTest(generated)) {
+          throw new Error("Đề do AI tạo không hợp lệ (thiếu câu hỏi/tình huống).");
+        }
+        await saveTestBank(combo.grade, combo.subject, { ...generated, source: "ai" });
+        logProgress(`${label}: đã lưu thành công.`, "var(--green)");
+        success = true;
+        doneCount++;
+      } catch (err) {
+        console.warn(`Lỗi khi tạo đề ${label}:`, err);
+        logProgress(`${label}: lỗi (${err?.message || err}) — sẽ thử lại.`, "var(--red)");
+      }
+    }
+    if (!success && !genAllStopRequested) {
+      failCount++;
+      logProgress(`${label}: bỏ qua sau 3 lần thử thất bại.`, "var(--red)");
+    }
+    loadBankOverview();
+  }
+
+  genAllRunning = false;
+  genAllMissingBtn.textContent = "Tạo toàn bộ đề còn thiếu (AI)";
+  logProgress(`Hoàn tất: ${doneCount} đề đã tạo, ${failCount} đề thất bại.`, "var(--text-mid)");
+  loadBankOverview();
+}
+
+genAllMissingBtn.onclick = () => {
+  if (genAllRunning) {
+    genAllStopRequested = true;
+    logProgress("Đang dừng sau khi hoàn tất đề hiện tại...", "var(--text-mid)");
+    return;
+  }
+  generateAllMissing();
+};
+
+// ============ Xuất ngân hàng câu hỏi (CSV / Excel) ============
+const exportScopeEl = document.getElementById("exportScope");
+const exportMsg = document.getElementById("exportMsg");
+
+function fmtBankTime(b) {
+  return b.updatedAt?.toDate ? b.updatedAt.toDate().toLocaleString("vi-VN") : "";
+}
+function srcLabel(src) { return src === "ai" ? "AI soạn" : "Soạn tay"; }
+
+// Dựng dữ liệu xuất: 2 bảng (trắc nghiệm / tự luận) + 1 bảng gộp cho CSV.
+function buildBankTables(banks) {
+  banks.sort((a, b) => (Number(a.grade) - Number(b.grade)) || String(a.subject).localeCompare(String(b.subject)));
+
+  const likertHead = ["Khối lớp", "Môn", "Nhóm chỉ báo", "Tên nhóm", "STT trong nhóm", "Mã câu", "Nội dung câu hỏi", "Đảo điểm", "Nguồn đề", "Cập nhật"];
+  const essayHead = ["Khối lớp", "Môn", "STT", "Mã tình huống", "Tiêu đề", "Bối cảnh / prompt", "Câu trả lời của AI", "Câu hỏi cho học sinh", "Ý chính cần có (nhãn: từ khoá)", "Từ khoá rủi ro", "Nguồn đề", "Cập nhật"];
+  const allHead = ["Khối lớp", "Môn", "Loại câu", "Nhóm chỉ báo / Tình huống", "STT", "Mã câu", "Nội dung câu hỏi", "Đảo điểm",
+    "Bối cảnh / prompt", "Câu trả lời của AI", "Ý chính cần có (nhãn: từ khoá)", "Từ khoá rủi ro", "Nguồn đề", "Cập nhật"];
+
+  const likert = [likertHead], essay = [essayHead], all = [allHead];
+  banks.forEach((b) => {
+    const lop = `Lớp ${b.grade}`;
+    const mon = SUBJECT_LABELS[b.subject] || b.subject;
+    const src = srcLabel(b.source);
+    const time = fmtBankTime(b);
+    (b.groups || []).forEach((g) => {
+      (g.questions || []).forEach((q, qi) => {
+        likert.push([lop, mon, g.key, g.title, qi + 1, q.id || "", q.text || "", q.reverse ? "Có" : "Không", src, time]);
+        all.push([lop, mon, "Trắc nghiệm", g.title, qi + 1, q.id || "", q.text || "", q.reverse ? "Có" : "Không", "", "", "", "", src, time]);
+      });
+    });
+    (b.scenarios || []).forEach((sc, si) => {
+      const kp = (sc.keyPoints || []).map((k) => `${k.label}: ${(k.keywords || []).join(", ")}`).join("\n");
+      const risk = (sc.riskKeywords || []).join(", ");
+      essay.push([lop, mon, si + 1, sc.id || "", sc.title || "", sc.prompt || "", sc.aiAnswer || "", sc.question || "", kp, risk, src, time]);
+      all.push([lop, mon, "Tự luận", sc.title || "", si + 1, sc.id || "", sc.question || "", "", sc.prompt || "", sc.aiAnswer || "", kp, risk, src, time]);
+    });
+  });
+  return { likert, essay, all, bankCount: banks.length };
+}
+
+async function collectBanksForExport() {
+  if (exportScopeEl.value === "selected") {
+    const grade = bankGradeEl.value, subject = bankSubjectEl.value;
+    const bank = await getTestBank(grade, subject);
+    return bank ? [{ ...bank, grade, subject }] : [];
+  }
+  return listAllTestBanks();
+}
+
+async function exportBank(kind) {
+  exportMsg.style.color = "var(--text-mid)";
+  exportMsg.textContent = "Đang chuẩn bị dữ liệu...";
+  try {
+    const banks = await collectBanksForExport();
+    if (banks.length === 0) {
+      exportMsg.style.color = "var(--red)";
+      exportMsg.textContent = exportScopeEl.value === "selected"
+        ? "Lớp + môn đang chọn chưa có đề trong ngân hàng để xuất."
+        : "Ngân hàng đề chưa có dữ liệu nào để xuất.";
+      return;
+    }
+    const t = buildBankTables(banks);
+    const scopeTag = exportScopeEl.value === "selected" ? `lop${bankGradeEl.value}-${bankSubjectEl.value}` : "tat-ca";
+    const base = `balanceai-ngan-hang-cau-hoi-${scopeTag}-${todayStamp()}`;
+    if (kind === "csv") {
+      downloadCSV(`${base}.csv`, t.all);
+    } else {
+      downloadXLSX(`${base}.xlsx`, [
+        { name: "Trắc nghiệm", rows: t.likert, widths: [10, 10, 14, 34, 8, 14, 70, 9, 10, 18] },
+        { name: "Tự luận", rows: t.essay, widths: [10, 10, 6, 10, 30, 50, 40, 50, 50, 32, 10, 18] },
+      ]);
+    }
+    exportMsg.style.color = "var(--green)";
+    exportMsg.textContent = `Đã xuất ${t.bankCount} đề (${t.likert.length - 1} câu trắc nghiệm, ${t.essay.length - 1} tình huống tự luận).`;
+  } catch (err) {
+    console.warn("Xuất ngân hàng câu hỏi thất bại:", err);
+    exportMsg.style.color = "var(--red)";
+    exportMsg.textContent = "Xuất file thất bại: " + (err?.message || "vui lòng thử lại.");
+  }
+}
+document.getElementById("exportBankCsvBtn").onclick = () => exportBank("csv");
+document.getElementById("exportBankXlsxBtn").onclick = () => exportBank("xlsx");
+
+function initBankTab() {
+  loadCurrentBank();
+  loadBankOverview();
+}
+</script>
+</body>
+</html>

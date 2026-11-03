@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BalanceAI — Dữ liệu khảo sát</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%96%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css" />
+<style>
+  .stat-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:20px 0; }
+  .stat-card{ background:var(--card-bg); border:1.5px solid var(--border); border-radius:20px; padding:18px 20px; }
+  .stat-card .num{ font-family:'Be Vietnam Pro',sans-serif; font-size:26px; font-weight:600; color:var(--orange2); }
+  .stat-card .label{ font-size:11px; color:var(--text-mid); margin-top:4px; }
+  .filter-row{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .filter-row select{ padding:9px 12px; border:1.5px solid var(--border); border-radius:12px; font-size:12.5px; font-family:'Be Vietnam Pro',sans-serif; }
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  th,td{ text-align:left; padding:9px 8px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th{ font-size:10.5px; color:var(--text-mid); font-weight:700; text-transform:uppercase; letter-spacing:0.5px; }
+  .pill{ font-size:10.5px; font-weight:700; padding:3px 10px; border-radius:999px; color:#fff; }
+  .table-scroll{ overflow-x:auto; }
+  .export-btn{
+    padding:9px 18px; border:1.5px solid var(--border); border-radius:12px; background:#fff;
+    font-size:12.5px; font-weight:700; color:var(--text-dark); cursor:pointer; display:inline-flex; gap:8px; align-items:center;
+  }
+  .export-btn:hover{ border-color:var(--orange); color:var(--orange2); }
+  .charts-grid{ display:grid; grid-template-columns:1fr; gap:16px; margin:20px 0; }
+  .charts-grid canvas{ max-height:260px; }
+  @media (max-width:800px){ .stat-grid{ grid-template-columns:repeat(2,1fr); } }
+
+  .key-gate-wrap{ max-width:420px; margin:60px auto; text-align:center; }
+  .key-gate-wrap i.fa-lock{ font-size:26px; color:var(--orange2); margin-bottom:14px; display:block; }
+  .key-gate-wrap input{
+    width:100%; padding:12px 14px; border:1.5px solid var(--border); border-radius:14px;
+    font-size:14px; letter-spacing:1.5px; text-align:center; text-transform:uppercase;
+    font-family:'Be Vietnam Pro',sans-serif; margin-top:16px;
+  }
+  .key-gate-wrap .key-msg{ font-size:12.5px; color:var(--red); min-height:16px; margin-top:10px; }
+  .key-gate-wrap button{ margin-top:14px; width:100%; }
+</style>
+</head>
+<body>
+
+<div id="keyGate" class="card key-gate-wrap">
+  <i class="fa-solid fa-lock"></i>
+  <h2 class="section-title" style="font-size:16px;">Trang dữ liệu dành riêng cho nhóm nghiên cứu</h2>
+  <p style="font-size:12.5px; color:var(--text-mid);">Nhập mã truy cập đã được nhóm nghiên cứu cấp để xem dữ liệu khảo sát.</p>
+  <input type="text" id="keyInput" placeholder="Nhập mã truy cập" maxlength="12" />
+  <div class="key-msg" id="keyMsg"></div>
+  <button class="acdi-btn-primary" id="keySubmitBtn" style="width:100%;">Xác nhận</button>
+</div>
+
+<main class="acdi-wrap" style="max-width:1100px; display:none;" id="dataMain">
+  <div class="section-label"><i class="fa-solid fa-chart-column"></i> Dữ liệu nội bộ</div>
+  <h2 class="section-title" style="margin-bottom:4px;">Dữ liệu khảo sát BalanceAI</h2>
+  <p style="font-size:12.5px; color:var(--text-mid); margin-bottom:6px;">Trang này hiển thị số liệu tổng hợp và chi tiết từ mọi lượt khảo sát đã hoàn thành. Dữ liệu hoàn toàn ẩn danh — chỉ có mã tham gia tự sinh, không có tên hay thông tin định danh cá nhân nào. Trang chỉ dành cho nhóm nghiên cứu, không công khai.</p>
+
+  <div class="stat-grid">
+    <div class="stat-card"><div class="num" id="statCount">-</div><div class="label">Người tham gia</div></div>
+    <div class="stat-card"><div class="num" id="statAvg">-</div><div class="label">BalanceAI trung bình</div></div>
+    <div class="stat-card"><div class="num" id="statHighRisk">-</div><div class="label">Mức 3–4 (lệ thuộc)</div></div>
+    <div class="stat-card"><div class="num" id="statLowRisk">-</div><div class="label">Mức 1 (kiểm soát tốt)</div></div>
+  </div>
+
+  <div class="card">
+    <h3 class="section-title" style="font-size:15px;">Biểu đồ tổng quan</h3>
+    <div id="chartsGrid" class="charts-grid" style="display:none;">
+      <canvas id="levelChart" height="220"></canvas>
+      <canvas id="radarChart" height="220"></canvas>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px;">
+    <div class="filter-row">
+      <select id="filterLevel">
+        <option value="">Tất cả cấp học</option>
+        <option value="thcs">THCS</option>
+        <option value="thpt">THPT</option>
+      </select>
+      <select id="filterGrade">
+        <option value="">Tất cả khối lớp</option>
+      </select>
+      <button class="export-btn" id="exportBtn" title="Mỗi học sinh một dòng, chỉ có điểm tổng hợp"><i class="fa-solid fa-file-csv"></i> CSV tổng hợp</button>
+      <button class="export-btn" id="exportDetailCsvBtn" title="Mỗi câu hỏi của mỗi học sinh một dòng, ghi rõ nội dung câu hỏi và đáp án"><i class="fa-solid fa-file-csv"></i> CSV chi tiết đáp án</button>
+      <button class="export-btn" id="exportXlsxBtn" title="Excel gồm sheet Tổng hợp + sheet Chi tiết đáp án"><i class="fa-solid fa-file-excel"></i> Excel (tổng hợp + chi tiết)</button>
+    </div>
+    <div id="exportMsg" style="font-size:12.5px; min-height:18px; margin:-6px 0 12px;"></div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Mã tham gia</th><th>Cấp học</th><th>Khối</th><th>Tần suất dùng AI</th><th>Điểm BalanceAI</th><th>Mức</th><th>Thời gian</th></tr>
+        </thead>
+        <tbody id="rowsBody"></tbody>
+      </table>
+      <div id="emptyState" class="empty-state" style="display:none; text-align:center; padding:30px; color:var(--text-mid); font-size:13px;">Chưa có dữ liệu khảo sát nào.</div>
+    </div>
+  </div>
+</main>
+
+<script src="balance-nav.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script type="module">
+import {
+  listAssessments, summarizeAssessments, LEVEL_INFO, checkStoredKeyStillValid, validateAndRegisterKey,
+  getTestBank, DEFAULT_ACDI_GROUPS, DEFAULT_SCENARIOS, GROUP_DEFS, SUBJECT_LABELS, LIKERT_OPTIONS,
+} from "./balance-shared.js";
+import { downloadCSV, downloadXLSX, todayStamp } from "./balance-export.js";
+
+const keyGate = document.getElementById("keyGate");
+const dataMain = document.getElementById("dataMain");
+const keyInput = document.getElementById("keyInput");
+const keyMsg = document.getElementById("keyMsg");
+const keySubmitBtn = document.getElementById("keySubmitBtn");
+
+function unlockDataPage() {
+  keyGate.style.display = "none";
+  dataMain.style.display = "block";
+  renderAcdiNav("data");
+  initDataPage();
+}
+
+async function tryKey(code) {
+  keyMsg.style.color = "var(--red)";
+  keyMsg.textContent = "Đang kiểm tra...";
+  keySubmitBtn.disabled = true;
+  try {
+    const res = await validateAndRegisterKey(code);
+    if (res.ok) {
+      try { localStorage.setItem("acdi_data_key", res.keyCode); } catch { /* ignore */ }
+      unlockDataPage();
+      return;
+    }
+    const reasonText = {
+      not_found: "Mã truy cập không tồn tại.",
+      revoked: "Mã truy cập đã bị thu hồi.",
+      expired: "Mã truy cập đã hết hạn.",
+      device_limit: "Mã truy cập đã đạt giới hạn số trình duyệt được phép dùng.",
+      empty: "Vui lòng nhập mã truy cập.",
+    };
+    keyMsg.textContent = reasonText[res.reason] || "Mã truy cập không hợp lệ.";
+  } catch (err) {
+    console.warn("Lỗi kiểm tra mã truy cập:", err);
+    keyMsg.textContent = "Có lỗi khi kiểm tra mã, vui lòng thử lại.";
+  } finally {
+    keySubmitBtn.disabled = false;
+  }
+}
+
+keySubmitBtn.onclick = () => tryKey(keyInput.value);
+keyInput.addEventListener("keydown", (e) => { if (e.key === "Enter") tryKey(keyInput.value); });
+
+(async function initGate() {
+  const stillValid = await checkStoredKeyStillValid().catch(() => false);
+  if (stillValid) { unlockDataPage(); return; }
+  keyGate.style.display = "block";
+})();
+
+const DIM_LABELS = {
+  start: "Bắt đầu nhiệm vụ", idea: "Ý tưởng", process: "Xử lí nhiệm vụ",
+  trust: "Tin vào kết quả AI", independence: "Khả năng độc lập",
+};
+
+let allRows = [];
+let levelChartInst = null;
+let radarChartInst = null;
+
+const filterGradeEl = document.getElementById("filterGrade");
+filterGradeEl.innerHTML = `<option value="">Tất cả khối lớp</option>` +
+  [6, 7, 8, 9, 10, 11, 12].map((g) => `<option value="${g}">Lớp ${g}</option>`).join("");
+
+function levelPillColor(level) {
+  return LEVEL_INFO[level]?.color || "#95a5a6";
+}
+function formatTime(ts) {
+  if (!ts) return "-";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  if (isNaN(d.getTime())) return "-";
+  return d.toLocaleString("vi-VN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function currentFilters() {
+  return {
+    level: document.getElementById("filterLevel").value,
+    grade: document.getElementById("filterGrade").value,
+  };
+}
+
+function filteredRows() {
+  const { level, grade } = currentFilters();
+  return allRows.filter((r) => (!level || r.schoolLevel === level) && (!grade || String(r.grade) === grade));
+}
+
+function renderCharts(rows) {
+  const chartsGrid = document.getElementById("chartsGrid");
+  if (levelChartInst) { levelChartInst.destroy(); levelChartInst = null; }
+  if (radarChartInst) { radarChartInst.destroy(); radarChartInst = null; }
+
+  // Luôn hiển thị đủ 2 biểu đồ (kể cả khi chưa có dữ liệu — biểu đồ sẽ hiện ở trạng thái rỗng).
+  chartsGrid.style.display = "grid";
+
+  const s = rows.length ? summarizeAssessments(rows) : { levelCounts: {}, dimAvg: {} };
+
+  levelChartInst = new Chart(document.getElementById("levelChart"), {
+    type: "bar",
+    data: {
+      labels: [1, 2, 3, 4].map((l) => `Mức ${l}`),
+      datasets: [{
+        label: "Số lượng",
+        data: [1, 2, 3, 4].map((l) => s.levelCounts[l] || 0),
+        backgroundColor: [1, 2, 3, 4].map((l) => LEVEL_INFO[l].color),
+        borderRadius: 8,
+      }],
+    },
+    options: {
+      animation: false,
+      plugins: { legend: { display: false }, title: { display: true, text: "Phân bố theo mức độ BalanceAI", font: { size: 12 } } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+    },
+  });
+
+  const dimKeys = Object.keys(DIM_LABELS);
+  radarChartInst = new Chart(document.getElementById("radarChart"), {
+    type: "radar",
+    data: {
+      labels: dimKeys.map((k) => DIM_LABELS[k]),
+      datasets: [{
+        label: "Điểm TB theo nhóm chỉ báo (0-100)",
+        data: dimKeys.map((k) => s.dimAvg[k] || 0),
+        backgroundColor: "rgba(109,93,252,0.18)",
+        borderColor: "#6d5dfc",
+        pointBackgroundColor: "#6d5dfc",
+      }],
+    },
+    options: {
+      animation: false,
+      scales: { r: { min: 0, max: 100, ticks: { display: false }, pointLabels: { font: { size: 10 } } } },
+      plugins: { legend: { display: false }, title: { display: true, text: "Điểm trung bình theo 5 nhóm chỉ báo", font: { size: 12 } } },
+    },
+  });
+}
+
+function renderDashboard() {
+  const rows = filteredRows();
+  document.getElementById("statCount").textContent = rows.length;
+  const avg = rows.length ? (rows.reduce((s, r) => s + (r.acdiScore || 0), 0) / rows.length).toFixed(1) : "-";
+  document.getElementById("statAvg").textContent = avg;
+  document.getElementById("statHighRisk").textContent = rows.filter((r) => r.acdiLevel >= 3).length;
+  document.getElementById("statLowRisk").textContent = rows.filter((r) => r.acdiLevel === 1).length;
+
+  renderCharts(rows);
+
+  const rowsBody = document.getElementById("rowsBody");
+  const emptyState = document.getElementById("emptyState");
+  if (rows.length === 0) {
+    rowsBody.innerHTML = "";
+    emptyState.style.display = "block";
+    return;
+  }
+  emptyState.style.display = "none";
+  const freqLabel = { daily: "Mỗi ngày", often: "Vài lần/tuần", sometimes: "Thỉnh thoảng", rarely: "Hiếm khi" };
+  rowsBody.innerHTML = rows.map((r) => `
+    <tr>
+      <td>${r.participantCode || "-"}</td>
+      <td>${(r.schoolLevel || "-").toUpperCase()}</td>
+      <td>${r.grade || "-"}</td>
+      <td>${freqLabel[r.aiFrequency] || r.aiFrequency || "-"}</td>
+      <td>${r.acdiScore ?? "-"}</td>
+      <td><span class="pill" style="background:${levelPillColor(r.acdiLevel)}">Mức ${r.acdiLevel ?? "-"}</span></td>
+      <td>${formatTime(r.createdAt)}</td>
+    </tr>
+  `).join("");
+}
+
+document.getElementById("filterLevel").addEventListener("change", renderDashboard);
+document.getElementById("filterGrade").addEventListener("change", renderDashboard);
+
+// ---------- Xuất dữ liệu ----------
+const exportMsg = document.getElementById("exportMsg");
+const FREQ_LABEL = { daily: "Hầu như mỗi ngày", often: "Vài lần một tuần", sometimes: "Thỉnh thoảng", rarely: "Hiếm khi" };
+const PURPOSE_LABEL = { study: "Học tập / làm bài tập", research: "Tra cứu thông tin", writing: "Viết bài, tóm tắt", entertainment: "Giải trí, trò chuyện", other: "Mục đích khác" };
+const SRC_SAVED = "Lưu cùng bài làm";
+const SRC_INFERRED = "Suy ra từ ngân hàng đề hiện tại (bài nộp cũ)";
+const SRC_UNKNOWN = "Không xác định (bài nộp cũ)";
+
+function setExportMsg(text, color) {
+  exportMsg.style.color = color || "var(--text-mid)";
+  exportMsg.textContent = text;
+}
+
+// ----- Bài nộp CŨ (trước khi hệ thống lưu nguyên văn câu hỏi): chỉ có mã câu -> giá trị. Cố gắng suy
+// nội dung câu hỏi từ ngân hàng đề hiện tại (có thể khác nếu đề đã được sửa sau đó). Câu trả lời tự
+// luận của bài nộp cũ không được lưu nên không thể khôi phục.
+const bankCache = new Map();
+async function cachedBank(grade, subject) {
+  const k = `${grade}_${subject}`;
+  if (!bankCache.has(k)) bankCache.set(k, await getTestBank(grade, subject).catch(() => null));
+  return bankCache.get(k);
+}
+const labelOfValue = (v) => LIKERT_OPTIONS.find((o) => o.value === Number(v))?.label || "";
+
+async function legacyDetails(r) {
+  const answers = r.questionnaireScores || {};
+  const perSc = r.scenarioScores || {};
+  const used = Array.isArray(r.testSubjectsUsed) ? r.testSubjectsUsed : [];
+  const isDefault = !r.testSource || r.testSource === "default";
+  const single = r.testSource === "bank" && used.length === 1;
+
+  let baseGroups = null, baseScenarios = null;
+  if (isDefault) { baseGroups = DEFAULT_ACDI_GROUPS; baseScenarios = DEFAULT_SCENARIOS; }
+  else if (single) {
+    const bank = await cachedBank(r.grade, used[0]);
+    baseGroups = bank?.groups || null; baseScenarios = bank?.scenarios || null;
+  }
+
+  const findIn = async (id) => {
+    let groups = baseGroups, qid = id;
+    if (!isDefault && !single) { // đề ghép nhiều môn: id có dạng "<nhóm>_<môn>_<mã gốc>"
+      const m = /^(start|idea|process|trust|independence)_([a-z]+)_(.+)$/.exec(id);
+      if (!m) return null;
+      groups = (await cachedBank(r.grade, m[2]))?.groups || null;
+      qid = m[3];
+    }
+    if (!groups) return null;
+    for (const g of groups) {
+      const q = g.questions.find((x) => x.id === qid);
+      if (q) return { g, q };
+    }
+    return null;
+  };
+
+  const gIdx = (key) => { const i = GROUP_DEFS.findIndex((d) => d.key === key); return i < 0 ? 99 : i; };
+  const items = [];
+  for (const id of Object.keys(answers)) {
+    const hit = await findIn(id);
+    const mKey = /^(start|idea|process|trust|independence)_/.exec(id)?.[1];
+    const key = hit?.g.key || mKey || "";
+    items.push({
+      id, groupKey: key, groupTitle: hit?.g.title || GROUP_DEFS.find((d) => d.key === key)?.title || "",
+      text: hit?.q.text || "", reverse: hit ? !!hit.q.reverse : null,
+      value: Number(answers[id]), label: labelOfValue(answers[id]), known: !!hit,
+    });
+  }
+  items.sort((a, b) => gIdx(a.groupKey) - gIdx(b.groupKey));
+  const counter = {};
+  items.forEach((it) => { counter[it.groupKey] = (counter[it.groupKey] || 0) + 1; it.index = counter[it.groupKey]; });
+
+  const scenarios = Object.keys(perSc).map((id) => {
+    const sc = (isDefault || single) ? (baseScenarios || []).find((x) => x.id === id) : null;
+    return {
+      id, title: sc?.title || "", prompt: sc?.prompt || "", aiAnswer: sc?.aiAnswer || "",
+      question: sc?.question || "", answer: "", score: perSc[id], known: !!sc,
+    };
+  });
+  return { questions: items, scenarios, legacy: true };
+}
+
+async function detailOf(r) {
+  if (r.responses && Array.isArray(r.responses.questions)) return { ...r.responses, legacy: false };
+  return legacyDetails(r);
+}
+
+const SUMMARY_HEAD = ["Mã tham gia", "Cấp học", "Khối lớp", "Môn đã chọn", "Tần suất dùng AI", "Mục đích dùng AI", "Điểm BalanceAI", "Mức", "Thời gian nộp"];
+function summaryCells(r) {
+  return [
+    r.participantCode || "", (r.schoolLevel || "").toUpperCase(), r.grade ?? "",
+    (r.subjects || []).map((s) => SUBJECT_LABELS[s] || s).join("; "),
+    FREQ_LABEL[r.aiFrequency] || r.aiFrequency || "",
+    (r.purposes || []).map((p) => PURPOSE_LABEL[p] || p).join("; "),
+    r.acdiScore ?? "", r.acdiLevel ?? "", formatTime(r.createdAt),
+  ];
+}
+
+const DETAIL_HEAD = [
+  ...SUMMARY_HEAD,
+  "Loại câu", "Nhóm chỉ báo / Tình huống", "STT", "Nội dung câu hỏi", "Đảo điểm",
+  "Giá trị đã chọn (1-5)", "Đáp án đã chọn (chữ)",
+  "Bối cảnh tình huống", "Câu trả lời của AI (trong đề)", "Câu trả lời tự luận của học sinh", "Điểm nguy cơ tình huống (0-100)",
+  "Nguồn nội dung câu hỏi",
+];
+
+async function buildDetailRows(rows, onProgress) {
+  const out = [DETAIL_HEAD];
+  let i = 0;
+  for (const r of rows) {
+    const base = summaryCells(r);
+    const d = await detailOf(r);
+    d.questions.forEach((q) => {
+      const src = d.legacy ? (q.known ? SRC_INFERRED : SRC_UNKNOWN) : SRC_SAVED;
+      out.push([...base, "Trắc nghiệm", q.groupTitle || q.groupKey || "", q.index ?? "", q.text || (q.id ? `(không xác định — mã ${q.id})` : ""),
+        q.reverse === null ? "" : (q.reverse ? "Có" : "Không"), q.value ?? "", q.label || "",
+        "", "", "", "", src]);
+    });
+    d.scenarios.forEach((sc, si) => {
+      const src = d.legacy ? (sc.known ? SRC_INFERRED : SRC_UNKNOWN) : SRC_SAVED;
+      const answerText = sc.answer || (d.legacy ? "(không được lưu ở bài nộp cũ)" : "");
+      out.push([...base, "Tự luận", sc.title || sc.id || "", si + 1, sc.question || (sc.id ? `(không xác định — mã ${sc.id})` : ""),
+        "", "", "", sc.prompt || "", sc.aiAnswer || "", answerText, sc.score ?? "", src]);
+    });
+    if (onProgress) onProgress(++i, rows.length);
+  }
+  return out;
+}
+
+function noRowsGuard(rows) {
+  if (rows.length === 0) { setExportMsg("Không có dữ liệu (theo bộ lọc hiện tại) để xuất.", "var(--red)"); return true; }
+  return false;
+}
+
+document.getElementById("exportBtn").onclick = () => {
+  const rows = filteredRows();
+  if (noRowsGuard(rows)) return;
+  downloadCSV(`balanceai-tong-hop-${todayStamp()}.csv`, [SUMMARY_HEAD, ...rows.map(summaryCells)]);
+  setExportMsg(`Đã xuất ${rows.length} lượt khảo sát (tổng hợp).`, "var(--green)");
+};
+
+let exportBusy = false;
+async function exportDetail(kind) {
+  if (exportBusy) return;
+  const rows = filteredRows();
+  if (noRowsGuard(rows)) return;
+  exportBusy = true;
+  try {
+    const detail = await buildDetailRows(rows, (i, n) => setExportMsg(`Đang chuẩn bị dữ liệu chi tiết... ${i}/${n}`));
+    if (kind === "csv") {
+      downloadCSV(`balanceai-chi-tiet-dap-an-${todayStamp()}.csv`, detail);
+    } else {
+      downloadXLSX(`balanceai-du-lieu-khao-sat-${todayStamp()}.xlsx`, [
+        { name: "Tổng hợp", rows: [SUMMARY_HEAD, ...rows.map(summaryCells)] },
+        { name: "Chi tiết đáp án", rows: detail,
+          widths: [12, 8, 8, 20, 18, 24, 10, 6, 18, 12, 30, 6, 70, 8, 10, 22, 50, 50, 60, 10, 28] },
+      ]);
+    }
+    const legacyCount = rows.filter((r) => !(r.responses && Array.isArray(r.responses.questions))).length;
+    setExportMsg(
+      `Đã xuất ${rows.length} học sinh (${detail.length - 1} dòng đáp án).` +
+      (legacyCount ? ` Lưu ý: ${legacyCount} bài nộp cũ không lưu sẵn nguyên văn nên nội dung câu hỏi được suy ra từ ngân hàng đề hiện tại và không có câu trả lời tự luận.` : ""),
+      "var(--green)");
+  } catch (err) {
+    console.warn("Xuất dữ liệu chi tiết thất bại:", err);
+    setExportMsg("Xuất file thất bại: " + (err?.message || "vui lòng thử lại."), "var(--red)");
+  } finally {
+    exportBusy = false;
+  }
+}
+document.getElementById("exportDetailCsvBtn").onclick = () => exportDetail("csv");
+document.getElementById("exportXlsxBtn").onclick = () => exportDetail("xlsx");
+
+async function initDataPage() {
+  allRows = await listAssessments();
+  renderDashboard();
+}
+</script>
+</body>
+</html>
